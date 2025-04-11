@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import json
 import contextlib
 from selenium import webdriver
 from PokerNow import PokerClient
@@ -8,22 +9,32 @@ from PokerNow import PokerClient
 def clear_console():
     os.system('cls' if os.name == 'nt' else 'clear')
 
-def get_state_summary(game_state):
-    players_summary = [
-        f"{p.name}-{p.stack}-{p.bet_value}-{p.status}-{p.hand_message}" 
-        for p in game_state.players
-    ]
-    summary = (
-        f"Game Type: {game_state.game_type}\n"
-        f"Pot Size: {game_state.pot_size}\n"
-        f"Community Cards: {[str(card) for card in game_state.community_cards]}\n"
-        f"Dealer Position: {game_state.dealer_position}\n"
-        f"Current Player: {game_state.current_player}\n"
-        f"Blinds: {game_state.blinds}\n"
-        f"Winners: {game_state.winners}\n"
-        f"Players: {players_summary}\n"
-        f"Is Your Turn: {game_state.is_your_turn}"
-    )
+def get_game_state_summary(game_state):
+    summary = {
+        "game_type": game_state.game_type,
+        "pot_size": game_state.pot_size,
+        "community_cards": [str(card) for card in game_state.community_cards],
+        "players": [],
+        "dealer_position": game_state.dealer_position,
+        "current_player": game_state.current_player,
+        "blinds": game_state.blinds,
+        "winners": [],
+        "is_your_turn": game_state.is_your_turn
+    }
+    for player in game_state.players:
+        summary["players"].append({
+            "name": player.name,
+            "stack": player.stack,
+            "bet": player.bet_value,
+            "cards": [str(card) for card in player.cards],
+            "status": str(player.status),
+            "hand_message": player.hand_message
+        })
+    for winner in game_state.winners:
+        summary["winners"].append({
+            "name": winner["name"],
+            "stack_info": winner["stack_info"]
+        })
     return summary
 
 def main():
@@ -32,16 +43,16 @@ def main():
     try:
         client = PokerClient(driver, cookie_path='cookie_file.pkl')
         client.navigate('https://network.pokernow.club/sessions/new')
-        input("Please complete the login process in the browser and press Enter to continue...")
+        input("Please complete the login process in the browser and press Enter once completed to confirm and continue...")
         client.cookie_manager.save_cookies()
 
         while True:
             gameLink = input("Please enter the link to your PokerNow table: ")
             if not gameLink.startswith("https://www.pokernow.club/games/"):
-                print("Invalid link.")
+                print("Invalid link. Try again")
                 continue
             if len(gameLink) != 57:
-                print("Invalid link.")
+                print("Invalid link. Try again")
                 continue
             break
 
@@ -49,20 +60,21 @@ def main():
         time.sleep(5)
 
         print("Starting game loop. Press Ctrl+C to exit.\n")
-
-        prev_state_summary = ""
         null_output = open(os.devnull, "w")
 
         while True:
             # Silence internal print statements
             with contextlib.redirect_stdout(null_output):
-                game_state = client.game_state_manager.get_game_state()
-                curr_state_summary = get_state_summary(game_state)
+                try:
+                    prev_game_state_summary = client.game_state_manager.get_game_state()
+                except Exception as e:
+                    print("Selenium session browser appears to be closed or exited or crashed:", e)                
+                current_game_state_summary = get_game_state_summary(prev_game_state_summary)
 
-            if curr_state_summary != prev_state_summary:
+            if current_game_state_summary != prev_game_state_summary:
                 clear_console()
-                print(curr_state_summary)
-                prev_state_summary = curr_state_summary
+                print(json.dumps(current_game_state_summary, indent=2))
+                prev_game_state_summary = current_game_state_summary
 
             time.sleep(2)  # check every 2 seconds
 
