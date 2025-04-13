@@ -6,7 +6,7 @@ import contextlib
 from selenium import webdriver
 from PokerNow import PokerClient
 
-from backend_feature import evaluate_starting_hand_strength
+from hand_strength import evaluate_starting_hand_strength
 
 def clear_console():
     os.system('cls' if os.name == 'nt' else 'clear')
