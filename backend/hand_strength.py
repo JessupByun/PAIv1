@@ -1,5 +1,3 @@
-# backend_feature.py
-
 # Ordered list of 169 starting hands from strongest to weakest
 # Source: common hand ranking used in poker tools
 starting_hands_ranked = [
@@ -23,6 +21,21 @@ starting_hands_ranked = [
     '54o', '53o', '52o', '43o', '42o', '32o'
 ]
 
+# Updated classification with broader inclusion of playable hands including small pairs
+HAND_CATEGORIES = {
+    "Premium": {
+        'AA', 'KK', 'QQ', 'JJ', 'AKs', 'AQs', 'AKo', 'TT'
+    },
+    "Strong": {
+        '99', '88', '77', 'AQo', 'AJs', 'KQs', 'AJo', 'KJs'
+    },
+    "Medium": {
+        '66', '55', '44', '33', '22', 'ATs', 'KTs', 'QJs', 'QTs', 'JTs',
+        'T9s', '98s', '87s', 'A9s', 'A8s', 'KJo', 'KQo', 'QJo'
+    }
+}
+HAND_CATEGORIES["Weak"] = set(starting_hands_ranked) - set().union(*HAND_CATEGORIES.values())
+
 def parse_card(card_str):
     value_str, _, suit = card_str.partition(' of ')
     return value_str[0] if value_str != '10' else 'T', suit[0]
@@ -40,13 +53,11 @@ def canonical_starting_hand(card1, card2):
     high, low = (val1, val2) if i1 > i2 else (val2, val1)
     return high + low + ('s' if suited else 'o')
 
-def rank_starting_hand(hand_str):
-    try:
-        rank = starting_hands_ranked.index(hand_str) + 1
-        percentile = 100 - int((rank - 1) / 168 * 100)
-        return f"{rank}/169, {percentile}th Percentile"
-    except ValueError:
-        return "Unknown Hand"
+def classify_starting_hand(hand_str):
+    for category, hands in HAND_CATEGORIES.items():
+        if hand_str in hands:
+            return category
+    return "Weak"
 
 def evaluate_starting_hand_strength(game_state_dict):
     # Find the first player with known hole cards
@@ -54,5 +65,5 @@ def evaluate_starting_hand_strength(game_state_dict):
         cards = player.get("cards", [])
         if all(card != "Unknown Card" for card in cards) and len(cards) == 2:
             hand = canonical_starting_hand(cards[0], cards[1])
-            return rank_starting_hand(hand)
+            return classify_starting_hand(hand)
     return "No known cards found"

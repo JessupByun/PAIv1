@@ -10,8 +10,6 @@ load_dotenv()
 api_key = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=api_key)
 
-# This prompt structure is adapted from the prompt example B.5. from the research paper: "Curated LLM: Synergy of LLMs and Data Curation for tabular augmentation in low-data regimes" (Seedatk, Huynh, et al.) https://arxiv.org/pdf/2312.12112 
-# The template is currently adapted to the 'insurance.csv' dataset (referenced in README.md)
 prompt_template_baseline = """
 System Role: You are a professional poker coach who provides detailed, structured explanations for poker decision-making.
 You have access to the game state summary and the recommended preflop decision below.

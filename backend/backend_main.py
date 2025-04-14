@@ -1,23 +1,24 @@
 import LLM_deployment
+import hand_strength
 
 #Testing dictionary
 sample_summary = {
     "game_type": "No Limit Texas Hold'em",
-    "pot_size": "50",
+    "pot_size": "70",
     "community_cards": ["9 of Diamonds", "2 of Clubs", "K of Hearts"],
     "players": [
         {
             "name": "jessup",
             "stack": "1000",
             "bet": "20",
-            "cards": ["Ace of Spades", "King of Clubs"],
+            "cards": ["Ace of Spades", "King of Hearts"],
             "status": "PlayerState.CURRENT",
             "hand_message": ""
         },
         {
             "name": "daniel",
             "stack": "900",
-            "bet": "30",
+            "bet": "50",
             "cards": ["Unknown Card", "Unknown Card"],
             "status": "PlayerState.ACTIVE",
             "hand_message": ""
@@ -32,12 +33,9 @@ sample_summary = {
 
 # Main function to get hand_strength
 
-
+print(hand_strength.evaluate_starting_hand_strength(sample_summary))
 
 # Main function to get preflop strategy
-
-
-
 
 # Main function to deploy LLM
 def run_llm_deployment():
