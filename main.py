@@ -6,7 +6,7 @@ import contextlib
 from selenium import webdriver
 from PokerNow import PokerClient
 
-from hand_strength import evaluate_starting_hand_strength
+from backend.hand_strength import evaluate_starting_hand_strength
 
 def clear_console():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -70,7 +70,7 @@ def main():
                 try:
                     prev_game_state_summary = client.game_state_manager.get_game_state()
                 except Exception as e:
-                    print("Selenium session browser appears to be closed or exited or crashed:", e)                
+                    print("Selenium session browser appears to be closed or exited or crashed:", e)     
                 current_game_state_summary = get_game_state_summary(prev_game_state_summary)
 
             if current_game_state_summary != prev_game_state_summary:

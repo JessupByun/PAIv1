@@ -1,4 +1,5 @@
 /.venv
 /venv
+.env
 cookie_file.pkl
 get-pip.py
