@@ -59,9 +59,9 @@ def classify_starting_hand(hand_str):
             return category
     return "Weak"
 
-def evaluate_starting_hand_strength(game_state_dict):
+def evaluate_starting_hand_strength(game_summary):
     # Find the first player with known hole cards
-    for player in game_state_dict.get("players", []):
+    for player in game_summary.get("players", []):
         cards = player.get("cards", [])
         if all(card != "Unknown Card" for card in cards) and len(cards) == 2:
             hand = canonical_starting_hand(cards[0], cards[1])

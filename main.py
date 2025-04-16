@@ -6,8 +6,6 @@ import contextlib
 from selenium import webdriver
 from PokerNow import PokerClient
 
-from backend.hand_strength import evaluate_starting_hand_strength
-
 def clear_console():
     os.system('cls' if os.name == 'nt' else 'clear')
 
@@ -76,7 +74,6 @@ def main():
             if current_game_state_summary != prev_game_state_summary:
                 clear_console()
                 print(json.dumps(current_game_state_summary, indent=2))
-                strength = evaluate_starting_hand_strength(current_game_state_summary)
                 print("Starting Hand Strength:", strength)
                 prev_game_state_summary = current_game_state_summary
 

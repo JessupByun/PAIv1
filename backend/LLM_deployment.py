@@ -44,10 +44,9 @@ def generate_response(model_name, game_summary, recommended_decision):
         )
         
         # Print the full response for debugging
-        print("Full Response:", response)
+        #print("Full Response:", response)
         
         generated_response = response.choices[0].message.content if response.choices else "No output"
-        
         return generated_response
     except Exception as e:
         print(f"Error generating data with model {model_name}: {e}")

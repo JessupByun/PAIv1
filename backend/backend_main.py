@@ -1,17 +1,19 @@
 import LLM_deployment
 import hand_strength
+import pot_odds
+import eval_best_hand
 
 #Testing dictionary
 sample_summary = {
     "game_type": "No Limit Texas Hold'em",
     "pot_size": "70",
-    "community_cards": ["9 of Diamonds", "2 of Clubs", "K of Hearts"],
+    "community_cards": ["2 of Spades", "3 of Spades", "Ace of Spades"],
     "players": [
         {
             "name": "jessup",
             "stack": "1000",
             "bet": "20",
-            "cards": ["Ace of Spades", "King of Hearts"],
+            "cards": ["8 of Spades", "9 of Spades"],
             "status": "PlayerState.CURRENT",
             "hand_message": ""
         },
@@ -31,13 +33,19 @@ sample_summary = {
     "is_your_turn": True
 }
 
-# Main function to get hand_strength
+# Example usage to get hand_strength
 
 print(hand_strength.evaluate_starting_hand_strength(sample_summary))
 
-# Main function to get preflop strategy
+# Example usage to get pot-odds strategy
 
-# Main function to deploy LLM
+print(pot_odds.calculate_pot_odds(sample_summary))
+
+# Example usage to get your hand classification
+
+print(eval_best_hand.evaluate_best_hand(sample_summary))
+
+# Example usage to to deploy LLM for explanations
 def run_llm_deployment():
     model_name = "llama-3.3-70b-versatile"
     game_summary = sample_summary
@@ -46,4 +54,7 @@ def run_llm_deployment():
     response = LLM_deployment.generate_response(model_name, game_summary, recommended_decision)
     print(f"Generated response for {model_name}:\n{response}\n")
 
-print(run_llm_deployment())
+run_llm_deployment()
+
+# Example usage to get preflop strategy
+
