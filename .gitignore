@@ -1,6 +1,12 @@
 /.venv
 /venv
-backend/__pycache__
 .env
 cookie_file.pkl
 get-pip.py
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.DS_Store
+hand_history.jsonl

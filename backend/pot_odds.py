@@ -8,7 +8,8 @@ def calculate_pot_odds(game_summary):
         all_bets = []
 
         for player in players:
-            bet = float(player.get("bet", "0").strip() or 0)
+            raw_bet = player.get("bet", 0)
+            bet = float(str(raw_bet).strip() or 0)
             all_bets.append(bet)
             if player.get("name") == current_player_name:
                 current_bet = bet
