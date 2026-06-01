@@ -67,7 +67,7 @@ class WSServer:
             async with websockets.serve(self._handler, "localhost", self.port):
                 print(f"[PAI] WebSocket server listening on ws://localhost:{self.port}")
                 await asyncio.Future()  # run forever
-        except OSError as e:
+        except OSError:
             print(f"[PAI] ERROR: Port {self.port} is already in use. "
                   f"Set a different port with: PAI_WS_PORT=8766 python main.py")
             raise

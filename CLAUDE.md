@@ -82,15 +82,21 @@ These rules apply to every session. Claude must follow them without being remind
 ### LLM is postflop only
 - Preflop: heuristic from GTO lookup table, no LLM call
 - Postflop (flop/turn/river): LLM decides AND explains
-- LLM fires once per unique `(hole_cards, community_cards)` hash; `llm_broadcast_sent` prevents double-push
-- LLM runs in a `daemon=True` thread so the game loop never blocks
-- On error: LLM returns `{}`, overlay falls back to heuristic silently
-- Model: `llama-3.3-70b-versatile` — do not change without verifying it's still available via `groq.models.list()`
+- **Trigger**: fires when it's your turn at a new decision spot, keyed on `(board, amount_to_call)`. Amount-to-call (not pot) is essential — PokerNow keeps a street's bets in `bet_value` and only sweeps them into `pot_size` at street end, so a check spot and a facing-a-bet spot share the same board AND pot. `_amount_to_call()` distinguishes them so the LLM re-fires for every bet/raise you face.
+- LLM runs in a `daemon=True` thread (`_fetch_llm_explanation`) with `try/finally` so `pending` can never get stuck; `llm_broadcast_sent` gates the single result push
+- On error: LLM returns `{}`, overlay keeps the heuristic recommendation
+- Model: `llama-3.3-70b-versatile` default; override with `PAI_LLM_MODEL` env var (`llama-3.1-8b-instant` ≈ 2× faster). Verify availability via `groq.models.list()` before changing.
+
+### Turn detection
+- The PokerNow lib's `is_your_turn()` requires a `.action-signal` element with text exactly `"Your Turn"` — too fragile to rely on alone
+- The loop OR's it with `len(available_actions) > 0`: action buttons only render on your turn, so non-empty actions is the reliable signal
+- `build_stats_payload()` guards against illogical actions: any recommended action not in `available_actions` is replaced (call → check → fold)
 
 ### Game loop must never die
 - The inner `while True` body is wrapped in `try/except Exception` — one bad tick never kills the session
 - State changes are detected by dict equality: `current_game_summary != prev_game_summary`
-- `hand_snapshots` and `action_history` reset when a new hand starts (preflop with no prior snapshot)
+- New hand resets all per-hand state (snapshots, `action_history`, `llm_cache`, `last_decision_key`) when community cards return to 0 while in a hand
+- `action_history` is diffed per-street: the baseline (`prev_street_summary`) resets at each street change because PokerNow zeroes `bet_value` between streets
 
 ### WebSocket caches last state for new connections
 - `WSServer._last_message` stores the most recent broadcast payload
@@ -183,9 +189,11 @@ pytest tests/ -m "not integration" -v
 | `dealer_position` is not a list index | It's an absolute seat number (1–10); sort active seats and rotate |
 | `you-player` CSS class may be absent before login | `get_player_seats()` returns `{}` gracefully; position falls back to `"Unknown"` |
 | WS `ws://` blocked on `https://` page | Enable `chrome://flags/#allow-insecure-localhost` |
-| LLM model decommissioned silently | Verify with `groq.models.list()` before changing; last verified: `llama-3.3-70b-versatile` |
+| LLM model decommissioned silently | Verify with `groq.models.list()` before changing; last verified: `llama-3.3-70b-versatile`. Override with `PAI_LLM_MODEL` env var (`llama-3.1-8b-instant` is ~2x faster) |
 | Double LLM broadcast every 2s | `llm_broadcast_sent` flag gates the secondary push |
 | Overlay blank on new connection | `WSServer._last_message` sends cached state to new connections on connect |
+| LLM never fires live; only heuristic "Check" shows | The lib's `is_your_turn()` needs `.action-signal` text == "Your Turn" (fragile). The loop OR's it with `len(available_actions) > 0` — action buttons only render on your turn, so that's the reliable signal |
+| Illogical action shown (e.g. "Check" facing a bet) | Usually stale state. `build_stats_payload()` guards: any recommended action not in `available_actions` is replaced by call→check→fold |
 | Game loop crash on winner block | Entire inner loop is wrapped in `try/except`; winners are safe to access there |
 
 ---

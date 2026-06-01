@@ -1,7 +1,9 @@
 def calculate_pot_odds(game_summary):
     try:
         pot_size = float(game_summary.get("pot_size", 0))
-        current_player_name = game_summary.get("current_player")
+        # Pot odds are always from the local player's perspective. Prefer you_name
+        # (set from the you-player CSS class); fall back to current_player.
+        hero_name = game_summary.get("you_name") or game_summary.get("current_player")
         players = game_summary.get("players", [])
 
         current_bet = 0
@@ -11,7 +13,7 @@ def calculate_pot_odds(game_summary):
             raw_bet = player.get("bet", 0)
             bet = float(str(raw_bet).strip() or 0)
             all_bets.append(bet)
-            if player.get("name") == current_player_name:
+            if player.get("name") == hero_name:
                 current_bet = bet
 
         # Get the highest bet made by any player

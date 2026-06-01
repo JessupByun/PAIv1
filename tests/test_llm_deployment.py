@@ -115,7 +115,7 @@ def test_llm_returns_valid_action():
     assert isinstance(result["action_reason"], str) and len(result["action_reason"]) > 10
     assert isinstance(result["risk_note"], str) and len(result["risk_note"]) > 5
 
-    print(f"\n--- LLM output ---")
+    print("\n--- LLM output ---")
     print(f"Action      : {result['action']}")
     print(f"Reason      : {result['action_reason']}")
     print(f"Key factors : {result['key_factors']}")

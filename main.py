@@ -13,7 +13,9 @@ from backend.heuristics import calculate_position, calculate_spr, calculate_effe
 from backend.ws_server import WSServer
 from backend.LLM_deployment import generate_dashboard_explanation
 
-LLM_MODEL = "llama-3.3-70b-versatile"
+# Model is configurable via env var. Defaults to the 70B (best decisions, ~1s).
+# For a faster demo set:  PAI_LLM_MODEL=llama-3.1-8b-instant  (~0.6s)
+LLM_MODEL = os.environ.get("PAI_LLM_MODEL", "llama-3.3-70b-versatile")
 WS_PORT = int(os.environ.get("PAI_WS_PORT", 8765))
 
 def clear_console():
@@ -185,6 +187,17 @@ def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
     # LLM action overrides heuristic when available; heuristic is the fallback
     recommended_action = llm.get("action") or heuristic_rec
 
+    # Defensive: never surface an action that isn't actually available right now.
+    # (Guards against stale state showing "Check" while facing a bet, etc.)
+    if available_actions:
+        valid = {a.lower() for a in available_actions}
+        if recommended_action and recommended_action.lower() not in valid:
+            # Prefer a sensible substitute: call > check > fold among what's offered
+            for sub in ("call", "check", "fold"):
+                if sub in valid:
+                    recommended_action = sub.title()
+                    break
+
     return {
         "is_your_turn": game_summary.get("is_your_turn", False),
         "street": _get_street(num_community),
@@ -210,10 +223,33 @@ def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
     }
 
 
+def _amount_to_call(game_summary: dict) -> float:
+    """
+    Chips the local player must add to call. This is the key signal for a NEW
+    decision point WITHIN a street: PokerNow keeps each street's bets in the
+    players' bet_value (not pot_size) until the street ends, so pot_size alone
+    can't tell a check spot apart from a facing-a-bet spot.
+    """
+    you_name = game_summary.get("you_name")
+    my_bet = 0.0
+    max_bet = 0.0
+    for p in game_summary.get("players", []):
+        b = _bet_of(p)
+        if p.get("name") == you_name:
+            my_bet = b
+        if b > max_bet:
+            max_bet = b
+    return max(0.0, max_bet - my_bet)
+
+
 def _fetch_llm_explanation(stats: dict, game_summary: dict, action_history: list, cache: dict):
-    result = generate_dashboard_explanation(LLM_MODEL, stats, game_summary, action_history)
-    cache["result"] = result
-    cache["pending"] = False
+    try:
+        cache["result"] = generate_dashboard_explanation(LLM_MODEL, stats, game_summary, action_history)
+    except Exception as e:
+        print(f"[PAI] LLM thread error: {type(e).__name__}: {e}")
+        cache["result"] = {}
+    finally:
+        cache["pending"] = False  # guarantee we never get stuck "pending"
 
 
 def _new_hand_state():
@@ -225,14 +261,25 @@ def _new_hand_state():
     }
 
 
+def _bet_of(player: dict) -> float:
+    try:
+        return float(str(player.get("bet") or 0).replace(",", ""))
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def _build_action_history(prev: dict, curr: dict, street: str, you_name: str) -> list[str]:
     """
-    Compare previous and current game summaries to detect all actions that occurred.
-    Returns a list of action strings (may be empty). Each entry is a full sentence
-    like 'Flop: Alice raised to 60' or 'Preflop: You called 20'.
+    Diff two consecutive game summaries (from the SAME street) and return any new
+    action strings, e.g. 'Flop: Villain bet 12' or 'Preflop: You called 6'.
 
-    Detects: folds, bets/raises (bet increased), calls (bet matched villain's bet),
-    and checks (turn passed with no bet change when current player changed).
+    PokerNow's per-player bet_value is the amount wagered ON THE CURRENT STREET only
+    and resets to 0 when a new street begins. This function must therefore only be
+    called when prev and curr are on the same street — the caller resets the action
+    baseline at each street change. See main loop.
+
+    Detects: folds, opening bets, raises, and calls. (Checks are inferred separately
+    by the caller via turn rotation, since a check leaves bet_value unchanged.)
     """
     if prev is None:
         return []
@@ -240,46 +287,30 @@ def _build_action_history(prev: dict, curr: dict, street: str, you_name: str) ->
     prev_players = {p["name"]: p for p in prev.get("players", [])}
     curr_players = {p["name"]: p for p in curr.get("players", [])}
 
-    # Max bet on the table this tick (used to distinguish call vs. check)
-    curr_bets = [float(str(p.get("bet") or 0)) for p in curr.get("players", [])]
-    max_curr_bet = max(curr_bets) if curr_bets else 0
+    prev_max = max((_bet_of(p) for p in prev.get("players", [])), default=0.0)
 
     events = []
     for name, curr_p in curr_players.items():
         prev_p = prev_players.get(name, {})
         label = "You" if name == you_name else name
 
-        try:
-            curr_bet = float(str(curr_p.get("bet") or 0))
-            prev_bet = float(str(prev_p.get("bet") or 0))
-        except (ValueError, TypeError):
-            curr_bet = prev_bet = 0
-
         curr_status = str(curr_p.get("status", ""))
         prev_status = str(prev_p.get("status", ""))
-
-        # Fold
         if "FOLDED" in curr_status and "FOLDED" not in prev_status:
             events.append(f"{street}: {label} folded")
             continue
 
-        bet_delta = curr_bet - prev_bet
-        if bet_delta <= 0:
-            continue
+        curr_bet = _bet_of(curr_p)
+        prev_bet = _bet_of(prev_p)
+        if curr_bet <= prev_bet:
+            continue  # no new chips committed by this player
 
-        # Bet increased — distinguish raise vs. call vs. open
-        prev_max_bets = [float(str(p.get("bet") or 0)) for p in prev.get("players", [])]
-        prev_max_bet = max(prev_max_bets) if prev_max_bets else 0
-
-        if prev_bet == 0 and prev_max_bet == 0:
-            # Opening bet / raise from nothing
-            events.append(f"{street}: {label} bet {curr_bet}")
-        elif curr_bet > prev_max_bet:
-            # Raised above the table's prior max bet
-            events.append(f"{street}: {label} raised to {curr_bet}")
+        if prev_max == 0:
+            events.append(f"{street}: {label} bet {curr_bet:.0f}")
+        elif curr_bet > prev_max:
+            events.append(f"{street}: {label} raised to {curr_bet:.0f}")
         else:
-            # Matched the prior max bet — it's a call
-            events.append(f"{street}: {label} called {bet_delta:.0f}")
+            events.append(f"{street}: {label} called {curr_bet:.0f}")
 
     return events
 
@@ -314,15 +345,19 @@ def main():
 
         null_output = open(os.devnull, "w")
 
-        prev_game_summary = None
+        # ── Per-session state ────────────────────────────────────────────────
+        prev_game_summary = None       # last tick's summary (for diffing)
+        prev_street_summary = None     # last tick's summary on the SAME street (action baseline)
         hand_snapshots = _new_hand_state()
+        action_history: list[str] = []
+        current_street = None          # None until first preflop tick of a hand
+        in_hand = False                # True once a hand is underway
         hand_saved = False
 
+        # LLM trigger state — fires once per unique (board, pot) decision spot
         llm_cache = {"result": {}, "pending": False}
-        last_turn_hash = None
         llm_broadcast_sent = False
-        action_history: list[str] = []
-        current_street = "Preflop"
+        last_decision_key = None       # (board, pot) of the last spot we fired on
 
         while True:
             try:
@@ -336,87 +371,132 @@ def main():
                 continue
 
             try:
+                num_community = len(current_game_summary["community_cards"])
+                new_street = _get_street(num_community)
+                you_name = current_game_summary.get("you_name")
+                user_cards = _get_user_cards(current_game_summary)
+
+                # Reliable "my turn" signal: PokerNow only renders the action
+                # buttons (fold/call/raise/check) when it's actually your turn.
+                # The library's is_your_turn() reads a .action-signal element whose
+                # text must exactly equal "Your Turn" — too fragile to rely on alone,
+                # so we OR it with "are there any action buttons?".
+                available_actions = current_game_summary.get("available_actions", [])
+                is_your_turn = (
+                    current_game_summary.get("is_your_turn", False)
+                    or len(available_actions) > 0
+                )
+                current_game_summary["is_your_turn"] = is_your_turn  # normalize for overlay
+
+                # ── New hand detection ──────────────────────────────────────
+                # A new hand starts when we're back to 0 community cards AND we
+                # were previously in a hand (or just have fresh hole cards we
+                # haven't seen). Reset all per-hand state.
+                is_new_hand = (
+                    num_community == 0
+                    and len(user_cards) == 2
+                    and (not in_hand or current_street not in (None, "Preflop"))
+                )
+                if is_new_hand:
+                    hand_snapshots = _new_hand_state()
+                    action_history = []
+                    current_street = "Preflop"
+                    in_hand = True
+                    hand_saved = False
+                    llm_cache = {"result": {}, "pending": False}
+                    llm_broadcast_sent = False
+                    last_decision_key = None
+                    prev_street_summary = None
+
                 state_changed = current_game_summary != prev_game_summary
 
                 if state_changed:
                     clear_console()
-                    num_community = len(current_game_summary["community_cards"])
-                    new_street = _get_street(num_community)
-                    you_name = current_game_summary.get("you_name")
 
-                    # Reset per-hand state on new hand
-                    if num_community == 0 and hand_snapshots["preflop"] is None:
-                        hand_snapshots = _new_hand_state()
-                        llm_cache = {"result": {}, "pending": False}
-                        last_turn_hash = None
-                        hand_saved = False
-                        llm_broadcast_sent = False
-                        action_history = []
-                        current_street = "Preflop"
+                    # ── Street change: reset the action-history baseline ─────
+                    # PokerNow resets per-player bet_value at each new street, so
+                    # we must not diff bets across a street boundary.
+                    street_changed = (new_street != current_street)
+                    if street_changed:
+                        current_street = new_street
+                        prev_street_summary = None
 
-                    # Track action history: detect bets/folds/calls between ticks
-                    if prev_game_summary is not None:
-                        new_events = _build_action_history(prev_game_summary, current_game_summary, current_street, you_name)
+                    # ── Accumulate action history (same-street diff only) ────
+                    if prev_street_summary is not None:
+                        new_events = _build_action_history(
+                            prev_street_summary, current_game_summary, current_street, you_name
+                        )
                         action_history.extend(new_events)
+                    prev_street_summary = current_game_summary
 
-                    # Update current street tracker
-                    current_street = new_street
+                    # ── Capture first snapshot of each street ────────────────
+                    key = {0: "preflop", 3: "flop", 4: "turn", 5: "river"}.get(num_community)
+                    if key and hand_snapshots.get(key) is None:
+                        hand_snapshots[key] = current_game_summary
 
-                    # Capture first snapshot of each street
-                    if num_community == 0 and hand_snapshots["preflop"] is None:
-                        hand_snapshots["preflop"] = current_game_summary
-                    elif num_community == 3 and hand_snapshots["flop"] is None:
-                        hand_snapshots["flop"] = current_game_summary
-                    elif num_community == 4 and hand_snapshots["turn"] is None:
-                        hand_snapshots["turn"] = current_game_summary
-                    elif num_community == 5 and hand_snapshots["river"] is None:
-                        hand_snapshots["river"] = current_game_summary
-
-                    # Build stats and broadcast
+                    # ── Build stats and broadcast to overlay ─────────────────
                     stats = build_stats_payload(current_game_summary, llm_cache["result"])
                     ws_server.broadcast(stats)
-                    llm_broadcast_sent = False
-
-                    # Fire LLM only on postflop streets when it's our turn
-                    # Preflop uses the GTO lookup table (heuristic) instead
-                    is_postflop = num_community >= 3
-                    if current_game_summary.get("is_your_turn") and is_postflop:
-                        user_cards = _get_user_cards(current_game_summary)
-                        community = current_game_summary.get("community_cards", [])
-                        turn_hash = hash((tuple(user_cards), tuple(community)))
-                        if turn_hash != last_turn_hash and not llm_cache["pending"]:
-                            last_turn_hash = turn_hash
-                            llm_cache["pending"] = True
-                            llm_cache["result"] = {}
-                            llm_broadcast_sent = False
-                            threading.Thread(
-                                target=_fetch_llm_explanation,
-                                args=(stats, current_game_summary, list(action_history), llm_cache),
-                                daemon=True,
-                            ).start()
 
                     # Console debug
-                    print(json.dumps(current_game_summary, indent=2))
-                    print("Starting Hand Strength:", stats["hand_strength"])
-                    if current_game_summary.get("is_your_turn"):
-                        print(f"[YOUR TURN] Rec: {stats['recommended_action']} | "
-                              f"Pos: {stats['position']} | "
-                              f"PotOdds: {stats['pot_odds']}% | "
-                              f"SPR: {stats['spr']}")
+                    print(f"\n── {current_street} | community={num_community} | "
+                          f"your_turn={is_your_turn} | actions={available_actions}")
+                    print(f"   Hand: {stats['hole_cards_display']} ({stats['hand_strength']}) | "
+                          f"Pos: {stats['position']} | Pot: {stats['pot_size']} | "
+                          f"PotOdds: {stats['pot_odds']}% | SPR: {stats['spr']}")
+                    if action_history:
+                        print(f"   History: {action_history}")
+                    if is_your_turn:
+                        print(f"   >>> YOUR TURN — heuristic says: {stats['recommended_action']}")
 
                     prev_game_summary = current_game_summary
 
-                # Push LLM result to overlay exactly once after it arrives
-                elif (not llm_broadcast_sent
-                      and not llm_cache["pending"]
-                      and llm_cache["result"]):
+                # ── LLM trigger: postflop, when it's your turn at a NEW spot ─
+                # A "spot" is identified by (board, amount-to-call). Using
+                # amount-to-call (not pot) is what lets a fresh check spot be told
+                # apart from facing a bet/raise on the SAME board — PokerNow doesn't
+                # sweep bets into the pot until the street ends. This re-fires on
+                # every street AND every bet/raise you face. Preflop uses the GTO table.
+                is_postflop = num_community >= 3
+                to_call = _amount_to_call(current_game_summary)
+                decision_key = (
+                    tuple(current_game_summary.get("community_cards", [])),
+                    round(to_call, 2),
+                )
+                new_spot = decision_key != last_decision_key
+                if is_your_turn and is_postflop and new_spot and not llm_cache["pending"]:
+                    last_decision_key = decision_key
+                    llm_cache["pending"] = True
+                    llm_cache["result"] = {}
+                    llm_broadcast_sent = False
+                    fresh_stats = build_stats_payload(current_game_summary, {})
+                    print(f"[PAI] 🔥 Firing LLM ({LLM_MODEL}) for {current_street} "
+                          f"decision (to_call={to_call:.0f})...")
+                    threading.Thread(
+                        target=_fetch_llm_explanation,
+                        args=(fresh_stats, current_game_summary, list(action_history), llm_cache),
+                        daemon=True,
+                    ).start()
+                elif (is_your_turn and is_postflop and not new_spot
+                      and not llm_cache["pending"] and not llm_cache["result"]):
+                    # Your turn, postflop, same spot as before, not pending, and no
+                    # result — means the LLM call errored. Surface it for the demo.
+                    print(f"[PAI] ⚠ your turn ({current_street}, to_call={to_call:.0f}) "
+                          f"but LLM returned no result (check earlier [PAI] LLM error)")
+
+                # ── Push LLM result to overlay once it arrives ───────────────
+                if (not llm_broadcast_sent
+                        and not llm_cache["pending"]
+                        and llm_cache["result"]):
                     stats = build_stats_payload(current_game_summary, llm_cache["result"])
                     ws_server.broadcast(stats)
                     llm_broadcast_sent = True
+                    print(f"[PAI] LLM decision broadcast: {llm_cache['result'].get('action')}")
 
-                # Print round summary once when winners are decided
+                # ── Round-over summary (once) ────────────────────────────────
                 if current_game_summary.get("winners") and not hand_saved:
                     hand_saved = True
+                    in_hand = False
                     print("\n=== Round Over ===")
                     for label, snap in [
                         ("Preflop", hand_snapshots["preflop"]),

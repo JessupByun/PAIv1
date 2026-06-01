@@ -144,13 +144,15 @@ Floating overlay panel           visible to user in browser
 **Action validation:** LLM `action` is validated against `available_actions` (case-insensitive). Falls back to substring match, then first available action if LLM returns something invalid.
 
 **Overlay behavior:**
-- While LLM is pending: overlay shows heuristic action + "analyzing…" source badge
-- After LLM returns: overlay updates with LLM action + "AI" source badge (purple)
-- Preflop: overlay shows heuristic action + "heuristic" source badge, no explanation text
+- On state change: overlay immediately shows the heuristic recommendation (instant)
+- ~1s later: overlay updates with the LLM's decision + reasoning, key factors, and risk note
+- Preflop: overlay shows the GTO-table action; no LLM explanation
 
-**Deduplication:** `hash((tuple(hole_cards), tuple(community_cards)))` → fires LLM only once per new board state. `llm_broadcast_sent` flag prevents re-broadcasting every 2s tick.
+**Trigger / deduplication:** Fires when it's your turn at a new decision spot, keyed on `(board, amount_to_call)`. Using amount-to-call (not pot) is essential: PokerNow keeps each street's bets in `bet_value` and only sweeps them into `pot_size` at street end, so a check spot and a facing-a-bet spot otherwise look identical. `_amount_to_call()` distinguishes them, so the LLM re-fires on every street *and* every bet/raise you face. `llm_broadcast_sent` gates the single result push.
 
-**Threading:** LLM runs in `daemon=True` thread; result stored in `llm_cache["result"]`; pushed to overlay once when ready.
+**Model:** `llama-3.3-70b-versatile` default (~1s), override with `PAI_LLM_MODEL` env var (`llama-3.1-8b-instant` ≈ 2× faster).
+
+**Threading:** LLM runs in a `daemon=True` thread with `try/finally`, so the `pending` flag never gets stuck even if a call errors; result is stored in `llm_cache["result"]` and pushed to the overlay once when ready.
 
 ---
 
@@ -170,6 +172,7 @@ Floating overlay panel           visible to user in browser
 - Labels "You" for `you_name`, real name for opponents
 - Entire list is passed to LLM prompt verbatim, numbered 1→N
 - `action_history` resets on each new hand
+- **Per-street baseline:** PokerNow zeroes each player's `bet_value` at the start of every street, so the diff baseline (`prev_street_summary`) resets at each street change — otherwise a fresh flop bet would be mis-read as a raise relative to the prior street's bets
 
 ---
 

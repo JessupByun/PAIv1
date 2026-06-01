@@ -101,6 +101,9 @@ Go to `chrome://flags/#allow-insecure-localhost` and enable it. This lets the ov
 ```bash
 source venv/bin/activate
 python main.py
+
+# Optional: use the faster 8B model for lower latency
+PAI_LLM_MODEL=llama-3.1-8b-instant python main.py
 ```
 
 1. Chrome opens → log into PokerNow when prompted
@@ -108,6 +111,18 @@ python main.py
 3. Paste your game URL: `https://www.pokernow.club/games/pgl...`
 4. The overlay appears top-right in the browser tab
 5. Stats update every 2s — overlay glows green when it's your turn
+
+**Watching it work:** the console logs each decision point, e.g.
+`🔥 Firing LLM (llama-3.3-70b-versatile) for Flop decision (to_call=8)...`
+followed by `LLM decision broadcast: Call`. The LLM re-fires on every street and
+every bet/raise you face.
+
+**Environment variables:**
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `GROQ_API_KEY` | — | Required. Your Groq API key |
+| `PAI_LLM_MODEL` | `llama-3.3-70b-versatile` | LLM model; set `llama-3.1-8b-instant` for ~2× speed |
+| `PAI_WS_PORT` | `8765` | WebSocket port for the overlay |
 
 ---
 

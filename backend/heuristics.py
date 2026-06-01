@@ -1,5 +1,5 @@
 from backend.preflop_table import lookup_preflop_action
-from backend.hand_strength import canonical_starting_hand, classify_starting_hand
+from backend.hand_strength import canonical_starting_hand
 
 def _get_user_player(game_summary):
     """
