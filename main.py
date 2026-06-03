@@ -9,7 +9,7 @@ from PokerNow import PokerClient
 from backend.hand_strength import evaluate_starting_hand_strength, canonical_starting_hand
 from backend.eval_best_hand import evaluate_best_hand
 from backend.pot_odds import calculate_pot_odds
-from backend.heuristics import calculate_position, calculate_spr, calculate_effective_stack, recommend_action
+from backend.heuristics import calculate_position, calculate_spr, calculate_effective_stack, recommend_action, recommend_bet_size
 from backend.ws_server import WSServer
 from backend.LLM_deployment import generate_dashboard_explanation
 
@@ -187,6 +187,13 @@ def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
     # LLM action overrides heuristic when available; heuristic is the fallback
     recommended_action = llm.get("action") or heuristic_rec
 
+    # Only surface a recommendation when it's actually our turn to act. Otherwise
+    # the overlay would show a stale/meaningless action (e.g. right after we raise,
+    # while the opponent is deciding). Stats (pot, position, hand strength) still show.
+    is_my_turn = game_summary.get("is_your_turn", False)
+    if not is_my_turn:
+        recommended_action = ""
+
     # Defensive: never surface an action that isn't actually available right now.
     # (Guards against stale state showing "Check" while facing a bet, etc.)
     if available_actions:
@@ -197,6 +204,23 @@ def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
                 if sub in valid:
                     recommended_action = sub.title()
                     break
+        # Never fold when checking is free — covers both the heuristic and the LLM,
+        # preflop (checked to you) and postflop (checked to you on any street).
+        if recommended_action.lower() == "fold" and "check" in valid:
+            recommended_action = "Check"
+
+    # Bet sizing + call amount for the overlay
+    action_l = recommended_action.lower() if recommended_action else ""
+    to_call = _amount_to_call(game_summary)
+    recommended_bet_size = None
+    if action_l in ("raise", "bet"):
+        if num_community == 0:
+            recommended_bet_size = recommend_bet_size(
+                game_summary, recommended_action, position, game_summary.get("blinds", [])
+            )
+        else:
+            recommended_bet_size = llm.get("bet_size")
+    to_call_amount = round(to_call) if (action_l == "call" and to_call > 0) else None
 
     return {
         "is_your_turn": game_summary.get("is_your_turn", False),
@@ -212,6 +236,8 @@ def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
         "effective_stack": effective_stack,
         "available_actions": available_actions,
         "recommended_action": recommended_action,
+        "recommended_bet_size": recommended_bet_size,
+        "to_call_amount": to_call_amount,
         "num_players": len(active_players),
         "community_cards_display": _format_cards_display(community_cards),
         "blinds": game_summary.get("blinds", []),
@@ -220,6 +246,7 @@ def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
         "llm_action_reason": llm.get("action_reason", ""),
         "llm_key_factors": llm.get("key_factors", []),
         "llm_risk_note": llm.get("risk_note", ""),
+        "llm_bet_size": llm.get("bet_size"),
     }
 
 
@@ -375,17 +402,23 @@ def main():
                 new_street = _get_street(num_community)
                 you_name = current_game_summary.get("you_name")
                 user_cards = _get_user_cards(current_game_summary)
-
-                # Reliable "my turn" signal: PokerNow only renders the action
-                # buttons (fold/call/raise/check) when it's actually your turn.
-                # The library's is_your_turn() reads a .action-signal element whose
-                # text must exactly equal "Your Turn" — too fragile to rely on alone,
-                # so we OR it with "are there any action buttons?".
                 available_actions = current_game_summary.get("available_actions", [])
-                is_your_turn = (
-                    current_game_summary.get("is_your_turn", False)
-                    or len(available_actions) > 0
-                )
+                current_player = current_game_summary.get("current_player")
+
+                # "My turn" detection. The authoritative signal is the player with
+                # the .decision-current class (current_player). When we can identify
+                # both who must act and who we are, compare them directly — this
+                # avoids false positives where action buttons or the .action-signal
+                # element linger for a tick AFTER we've already acted (which caused
+                # the overlay to re-recommend a raise on our own bet). Only fall back
+                # to the noisier signals when identity is unknown.
+                if you_name and current_player and current_player != "unknown":
+                    is_your_turn = (current_player == you_name)
+                else:
+                    is_your_turn = (
+                        current_game_summary.get("is_your_turn", False)
+                        or len(available_actions) > 0
+                    )
                 current_game_summary["is_your_turn"] = is_your_turn  # normalize for overlay
 
                 # ── New hand detection ──────────────────────────────────────

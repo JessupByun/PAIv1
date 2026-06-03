@@ -112,10 +112,19 @@
     const hasLLM = data.llm_action_reason || (data.llm_key_factors && data.llm_key_factors.length);
 
     if (recEl) {
-      recEl.textContent = data.recommended_action || "—";
+      const action = (data.recommended_action || "").toLowerCase();
+      let label = data.recommended_action || "—";
+      // Show the size to raise/bet TO, e.g. "RAISE → 45"
+      if ((action === "raise" || action === "bet") && data.recommended_bet_size) {
+        label = `${label} → ${Math.round(data.recommended_bet_size)}`;
+      // Or the amount needed to call, e.g. "CALL 8"
+      } else if (action === "call" && data.to_call_amount) {
+        label = `${label} ${Math.round(data.to_call_amount)}`;
+      }
+      recEl.textContent = label;
       recEl.className = "";
       if (data.recommended_action) {
-        recEl.classList.add(`pai-rec-${data.recommended_action.toLowerCase()}`);
+        recEl.classList.add(`pai-rec-${action}`);
       }
     }
 

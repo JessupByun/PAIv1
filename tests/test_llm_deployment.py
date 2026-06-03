@@ -7,9 +7,46 @@ import pytest
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from backend.LLM_deployment import generate_dashboard_explanation, _build_prompt, _players_block
+import backend.LLM_deployment as LLM
+from backend.LLM_deployment import (
+    generate_dashboard_explanation, _build_prompt, _players_block, _coerce_bet_size,
+    _bluff_directive,
+)
 
 MODEL = "llama-3.3-70b-versatile"
+
+
+# ── _coerce_bet_size (unit) ──────────────────────────────────────────────────
+
+def test_coerce_bet_size_normal():
+    assert _coerce_bet_size(30, 100) == 30
+    assert _coerce_bet_size("45", 100) == 45
+
+def test_coerce_bet_size_clamps_to_stack():
+    # Never suggest betting more than the effective stack
+    assert _coerce_bet_size(500, 80) == 80
+
+def test_coerce_bet_size_invalid():
+    assert _coerce_bet_size(0, 100) is None
+    assert _coerce_bet_size(-10, 100) is None
+    assert _coerce_bet_size("lots", 100) is None
+    assert _coerce_bet_size(None, 100) is None
+
+
+# ── _bluff_directive (unit) ──────────────────────────────────────────────────
+
+def test_bluff_directive_disabled(monkeypatch):
+    monkeypatch.setattr(LLM, "BLUFF_RATE", 0.0)
+    assert all(_bluff_directive() == "" for _ in range(50))
+
+def test_bluff_directive_always_on(monkeypatch):
+    monkeypatch.setattr(LLM, "BLUFF_RATE", 1.0)
+    # rate 1.0 → every roll yields a (non-empty) bluff nudge
+    assert all(_bluff_directive() != "" for _ in range(50))
+
+def test_bluff_directive_mentions_bluff(monkeypatch):
+    monkeypatch.setattr(LLM, "BLUFF_RATE", 1.0)
+    assert any("bluff" in _bluff_directive().lower() for _ in range(20))
 
 # ── Shared fixtures ───────────────────────────────────────────────────────────
 
@@ -115,8 +152,16 @@ def test_llm_returns_valid_action():
     assert isinstance(result["action_reason"], str) and len(result["action_reason"]) > 10
     assert isinstance(result["risk_note"], str) and len(result["risk_note"]) > 5
 
+    # bet_size is present; a positive number when raising/betting, else None
+    assert "bet_size" in result, f"Missing 'bet_size' key in: {result}"
+    if result["action"].lower() in ("raise", "bet"):
+        assert result["bet_size"] is None or result["bet_size"] > 0
+    else:
+        assert result["bet_size"] is None
+
     print("\n--- LLM output ---")
     print(f"Action      : {result['action']}")
+    print(f"Bet size    : {result['bet_size']}")
     print(f"Reason      : {result['action_reason']}")
     print(f"Key factors : {result['key_factors']}")
     print(f"Risk note   : {result['risk_note']}")

@@ -167,16 +167,19 @@ def recommend_action(game_summary, hand_strength, pot_odds, spr, position, avail
             if len(cards) == 2 and all(c != "Unknown Card" for c in cards):
                 hand_canonical = canonical_starting_hand(cards[0], cards[1])
                 table_action = lookup_preflop_action(hand_canonical, position)
+                # Never fold for free: if it's checked to us (we have the option),
+                # check instead of folding. This must come BEFORE the "table action
+                # is available" check, because Fold is always an offered button.
+                if table_action == "Fold" and can_check:
+                    return "Check"
                 # Validate the table action is actually available
                 if table_action.lower() in actions_lower:
                     return table_action
-                # Fallback: if table says Raise but only Call available
+                # Fallbacks if the table action isn't directly offered
                 if table_action == "Raise" and can_call:
                     return "Call"
                 if table_action in ("Call", "Raise") and can_check:
                     return "Check"
-                if table_action == "Fold" and can_check:
-                    return "Check"  # free look
 
     # --- Postflop heuristic ---
     if can_check:
@@ -205,3 +208,44 @@ def recommend_action(game_summary, hand_strength, pot_odds, spr, position, avail
         return "Fold"
     # Trash — always fold unless it's free
     return "Fold"
+
+
+def recommend_bet_size(game_summary, action, position, blinds):
+    """
+    Preflop raise sizing in chips. Returns an int (the total amount to raise TO)
+    or None if not applicable.
+
+    - Unopened pot (RFI / open): 2.5x BB, or 3x BB from the Small Blind (OOP)
+    - Facing a raise (3-bet): 3x the largest bet, or 4x out of position (blinds)
+    Always capped to the effective stack (never suggest betting more than you have).
+    """
+    if str(action).lower() not in ("raise", "bet"):
+        return None
+
+    bb = _safe_float_stack(blinds[1]) if blinds and len(blinds) >= 2 else None
+    if not bb or bb <= 0:
+        return None
+
+    # Size off the largest OPPONENT bet, never our own — otherwise, right after we
+    # raise (e.g. to 60), our own bet would be read as a raise to "3-bet" to 240.
+    you_name = game_summary.get("you_name")
+    opp_max_bet = 0.0
+    for p in game_summary.get("players", []):
+        if p.get("name") == you_name:
+            continue
+        b = _safe_float_stack(p.get("bet")) or 0.0
+        if b > opp_max_bet:
+            opp_max_bet = b
+
+    if opp_max_bet <= bb:
+        # No opponent has raised beyond the blind — this is an open raise
+        size = (3.0 if position == "Small Blind" else 2.5) * bb
+    else:
+        # Facing an opponent's raise — 3-bet relative to THEIR bet; bigger OOP
+        mult = 4.0 if position in ("Small Blind", "Big Blind") else 3.0
+        size = mult * opp_max_bet
+
+    eff = calculate_effective_stack(game_summary)
+    if eff and size > eff:
+        size = eff  # all-in cap
+    return round(size)

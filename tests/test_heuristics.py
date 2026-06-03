@@ -7,6 +7,7 @@ from backend.heuristics import (
     calculate_spr,
     calculate_effective_stack,
     recommend_action,
+    recommend_bet_size,
     _safe_float_stack,
 )
 
@@ -192,3 +193,69 @@ def test_recommend_check_when_trash_and_free():
     s = _rec_summary(community_cards=["Ace of Spades", "King of Hearts", "2 of Clubs"])
     action = recommend_action(s, "Trash", 0.0, 5.0, "Early", ["fold", "check", "raise"])
     assert action == "Check"
+
+
+def test_recommend_preflop_checked_to_bb_never_folds():
+    # BB with a trash hand, checked around: fold button is present, but checking
+    # is free — must Check, never Fold. (Regression: used to return Fold.)
+    s = {
+        "community_cards": [],
+        "players": [{"name": "You", "stack": 100, "cards": ["7 of Spades", "2 of Hearts"],
+                     "status": "Active", "bet": 2, "seat": 1}],
+        "pot_size": 5, "current_player": "You", "dealer_position": "1", "you_name": "You",
+    }
+    action = recommend_action(s, "Trash", None, 50.0, "Big Blind", ["fold", "check", "raise"])
+    assert action == "Check"
+
+
+# ── recommend_bet_size ────────────────────────────────────────────────────────
+
+def _size_summary(players, blinds_bb=2):
+    return {"players": players, "pot_size": 10, "you_name": "You", "dealer_position": "1"}
+
+
+def test_bet_size_open_raise():
+    # Unopened pot (only blinds posted) → 2.5x BB open
+    s = _size_summary([_user_player(stack=200), _make_player("Vil", stack=200, bet=2)])
+    size = recommend_bet_size(s, "Raise", "Late", [1, 2])
+    assert size == 5  # 2.5 * 2
+
+
+def test_bet_size_sb_opens_larger():
+    s = _size_summary([_user_player(stack=200), _make_player("Vil", stack=200, bet=2)])
+    size = recommend_bet_size(s, "Raise", "Small Blind", [1, 2])
+    assert size == 6  # 3 * 2
+
+
+def test_bet_size_three_bet_vs_raise():
+    # Villain opened to 6 → 3-bet to 3x = 18 (in position)
+    s = _size_summary([_user_player(stack=200), _make_player("Vil", stack=200, bet=6)])
+    size = recommend_bet_size(s, "Raise", "Late", [1, 2])
+    assert size == 18
+
+
+def test_bet_size_none_when_not_raising():
+    s = _size_summary([_user_player(stack=200)])
+    assert recommend_bet_size(s, "Call", "Late", [1, 2]) is None
+    assert recommend_bet_size(s, "Fold", "Late", [1, 2]) is None
+
+
+def test_bet_size_capped_to_effective_stack():
+    # Tiny stacks: 3-bet math would exceed stack → cap to effective stack
+    s = _size_summary([_user_player(stack=15), _make_player("Vil", stack=15, bet=6)])
+    size = recommend_bet_size(s, "Raise", "Late", [1, 2])
+    assert size == 15  # capped, not 18
+
+
+def test_bet_size_ignores_own_raise():
+    # Regression: after we raise to 60, our own bet must NOT be read as a raise to
+    # 3-bet to ~240. Opponent only has the BB (20) in → treat as an open vs the blind.
+    s = {
+        "players": [
+            _make_player("You", stack=140, bet=60, cards=["Ace of Spades", "King of Hearts"]),
+            _make_player("Vil", stack=180, bet=20),
+        ],
+        "pot_size": 80, "you_name": "You", "dealer_position": "1",
+    }
+    size = recommend_bet_size(s, "Raise", "Small Blind", [10, 20])
+    assert size == 60  # 3x the BB open, not 4x our own 60 (=240)
