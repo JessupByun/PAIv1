@@ -106,7 +106,7 @@ def _format_cards_display(card_list: list) -> str:
     return ' '.join(parts)
 
 
-def inject_overlay(driver):
+def inject_overlay(driver, ws_port: int):
     css_path = os.path.join(os.path.dirname(__file__), "frontend", "overlay.css")
     js_path  = os.path.join(os.path.dirname(__file__), "frontend", "content.js")
 
@@ -124,6 +124,7 @@ def inject_overlay(driver):
         }
     """, css)
 
+    driver.execute_script("window.__PAI_WS_PORT = arguments[0];", ws_port)
     driver.execute_script("""
         if (!window.__pai_injected) {
             window.__pai_injected = true;
@@ -321,7 +322,7 @@ def main():
         client.navigate(gameLink)
         time.sleep(5)
 
-        inject_overlay(driver)
+        inject_overlay(driver, WS_PORT)
         print("Overlay injected. Starting game loop. Press Ctrl+C to exit.\n")
 
         # ── Per-session state ────────────────────────────────────────────────

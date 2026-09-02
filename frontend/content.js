@@ -1,5 +1,6 @@
 (() => {
-  const WS_URL = "ws://localhost:8765";
+  // Port is stamped on window by inject_overlay() so PAI_WS_PORT reaches the overlay.
+  const WS_URL = `ws://localhost:${window.__PAI_WS_PORT || 8765}`;
   const RECONNECT_DELAY_MS = 3000;
 
   // ── Build overlay DOM ────────────────────────────────────────────────────
@@ -100,7 +101,7 @@
     set("pai-starting-hand", data.starting_hand
       ? `${data.starting_hand}  [${data.hand_strength}]`
       : "—");
-    set("pai-best-hand",     data.best_hand || (data.street === "Preflop" ? "—" : "—"));
+    set("pai-best-hand",     data.best_hand || "—");
     set("pai-street",        data.street || "—");
     set("pai-pot",           data.pot_size != null ? data.pot_size.toFixed(1) : "—");
     set("pai-pot-odds",      (data.pot_odds != null && data.pot_odds > 0) ? `${data.pot_odds.toFixed(1)}%` : "—");
@@ -138,8 +139,12 @@
         reasonEl.classList.remove("pai-explain-pending");
       }
       if (factorsEl) {
-        factorsEl.innerHTML = (data.llm_key_factors || [])
-          .map(f => `<li>${f}</li>`).join("");
+        // Model output goes in as text, never markup.
+        factorsEl.replaceChildren(...(data.llm_key_factors || []).map(f => {
+          const li = document.createElement("li");
+          li.textContent = f;
+          return li;
+        }));
       }
       if (riskEl) {
         riskEl.textContent = data.llm_risk_note ? `⚠ ${data.llm_risk_note}` : "";
@@ -149,7 +154,7 @@
         reasonEl.textContent = isYourTurn ? "AI is analyzing the hand…" : "—";
         reasonEl.classList.toggle("pai-explain-pending", isYourTurn);
       }
-      if (factorsEl) factorsEl.innerHTML = "";
+      if (factorsEl) factorsEl.replaceChildren();
       if (riskEl)    riskEl.textContent = "";
     }
   }
