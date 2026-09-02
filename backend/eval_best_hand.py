@@ -1,8 +1,13 @@
-from treys import Card, Evaluator
-from collections import Counter
 import itertools
+from collections import Counter
+
+from treys import Card, Evaluator
+
+from backend.util import hole_cards
 
 RANK_CHARS = '23456789TJQKA'
+_EVALUATOR = Evaluator()
+
 
 def convert_card_to_treys(card_str):
     rank_str, suit_str = card_str.strip().split(' of ')
@@ -47,15 +52,9 @@ def _describe_hand(hand_class, best_combo):
 
 def evaluate_best_hand(game_summary):
     community = game_summary.get("community_cards", [])
-    player_cards = None
+    player_cards = hole_cards(game_summary)
 
-    for p in game_summary.get("players", []):
-        cards = p.get("cards", [])
-        if len(cards) == 2 and all(c != "Unknown Card" for c in cards):
-            player_cards = cards
-            break
-
-    if not player_cards or len(player_cards) != 2 or any(c == "Unknown Card" for c in player_cards):
+    if not player_cards:
         return "Unknown cards in player hand"
 
     if len(community + player_cards) < 5:
@@ -66,16 +65,12 @@ def evaluate_best_hand(game_summary):
     except Exception:
         return "Card conversion error"
 
-    evaluator = Evaluator()
-    best_score = 9999
-    best_class = "High Card"
-    best_combo = None
-
-    for combo in itertools.combinations(all_cards, 5):
-        score = evaluator.evaluate([], list(combo))
-        if score < best_score:
-            best_score = score
-            best_class = evaluator.class_to_string(evaluator.get_rank_class(score))
-            best_combo = combo
+    # treys ranks hands low-to-high, so the best 5-card combo is the minimum score.
+    best_score, best_combo = min(
+        ((_EVALUATOR.evaluate([], list(combo)), combo)
+         for combo in itertools.combinations(all_cards, 5)),
+        key=lambda scored: scored[0],
+    )
+    best_class = _EVALUATOR.class_to_string(_EVALUATOR.get_rank_class(best_score))
 
     return _describe_hand(best_class, best_combo)

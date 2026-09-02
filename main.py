@@ -10,6 +10,7 @@ from backend.hand_strength import evaluate_starting_hand_strength, canonical_sta
 from backend.eval_best_hand import evaluate_best_hand
 from backend.pot_odds import calculate_pot_odds
 from backend.heuristics import calculate_position, calculate_spr, calculate_effective_stack, recommend_action, recommend_bet_size
+from backend.util import amount_to_call, chips, hole_cards, is_active, safe_float
 from backend.ws_server import WSServer
 from backend.LLM_deployment import generate_dashboard_explanation
 
@@ -28,7 +29,7 @@ def get_player_seats(driver) -> dict:
     Result includes a special key '__you__' with the local player's name.
     """
     try:
-        result = driver.execute_script("""
+        result = driver.execute_script(r"""
             var result = {};
             var youName = null;
             var players = document.querySelectorAll('.table-player');
@@ -135,28 +136,18 @@ def _get_street(num_community: int) -> str:
     return {0: "Preflop", 3: "Flop", 4: "Turn", 5: "River"}.get(num_community, "Unknown")
 
 
-def _get_user_cards(game_summary: dict) -> list:
-    for p in game_summary.get("players", []):
-        cards = p.get("cards", [])
-        if len(cards) == 2 and all(c != "Unknown Card" for c in cards):
-            return cards
-    return []
-
-
 def _safe_json_float(val):
-    if val is None:
+    """Round for the overlay, dropping inf/NaN which aren't valid JSON."""
+    f = safe_float(val)
+    if f is None or f != f or f in (float("inf"), float("-inf")):
         return None
-    try:
-        f = float(val)
-        return None if (f == float('inf') or f == float('-inf') or f != f) else round(f, 2)
-    except (TypeError, ValueError):
-        return None
+    return round(f, 2)
 
 
 def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
     num_community = len(game_summary.get("community_cards", []))
     community_cards = game_summary.get("community_cards", [])
-    user_cards = _get_user_cards(game_summary)
+    user_cards = hole_cards(game_summary)
     starting_hand = ""
     hand_strength = "Unknown"
     if len(user_cards) == 2:
@@ -175,9 +166,7 @@ def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
     spr = _safe_json_float(calculate_spr(game_summary))
     effective_stack = _safe_json_float(calculate_effective_stack(game_summary))
     available_actions = game_summary.get("available_actions", [])
-    active_players = [p for p in game_summary.get("players", [])
-                      if "FOLDED" not in str(p.get("status", "")) and
-                         "OFFLINE" not in str(p.get("status", ""))]
+    active_players = [p for p in game_summary.get("players", []) if is_active(p)]
 
     heuristic_rec = recommend_action(
         game_summary, hand_strength, pot_odds, spr, position, available_actions
@@ -211,7 +200,7 @@ def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
 
     # Bet sizing + call amount for the overlay
     action_l = recommended_action.lower() if recommended_action else ""
-    to_call = _amount_to_call(game_summary)
+    to_call = amount_to_call(game_summary)
     recommended_bet_size = None
     if action_l in ("raise", "bet"):
         if num_community == 0:
@@ -250,25 +239,6 @@ def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
     }
 
 
-def _amount_to_call(game_summary: dict) -> float:
-    """
-    Chips the local player must add to call. This is the key signal for a NEW
-    decision point WITHIN a street: PokerNow keeps each street's bets in the
-    players' bet_value (not pot_size) until the street ends, so pot_size alone
-    can't tell a check spot apart from a facing-a-bet spot.
-    """
-    you_name = game_summary.get("you_name")
-    my_bet = 0.0
-    max_bet = 0.0
-    for p in game_summary.get("players", []):
-        b = _bet_of(p)
-        if p.get("name") == you_name:
-            my_bet = b
-        if b > max_bet:
-            max_bet = b
-    return max(0.0, max_bet - my_bet)
-
-
 def _fetch_llm_explanation(stats: dict, game_summary: dict, action_history: list, cache: dict):
     try:
         cache["result"] = generate_dashboard_explanation(LLM_MODEL, stats, game_summary, action_history)
@@ -286,13 +256,6 @@ def _new_hand_state():
         "turn": None,
         "river": None,
     }
-
-
-def _bet_of(player: dict) -> float:
-    try:
-        return float(str(player.get("bet") or 0).replace(",", ""))
-    except (ValueError, TypeError):
-        return 0.0
 
 
 def _build_action_history(prev: dict, curr: dict, street: str, you_name: str) -> list[str]:
@@ -314,7 +277,7 @@ def _build_action_history(prev: dict, curr: dict, street: str, you_name: str) ->
     prev_players = {p["name"]: p for p in prev.get("players", [])}
     curr_players = {p["name"]: p for p in curr.get("players", [])}
 
-    prev_max = max((_bet_of(p) for p in prev.get("players", [])), default=0.0)
+    prev_max = max((chips(p.get("bet")) for p in prev.get("players", [])), default=0.0)
 
     events = []
     for name, curr_p in curr_players.items():
@@ -327,8 +290,8 @@ def _build_action_history(prev: dict, curr: dict, street: str, you_name: str) ->
             events.append(f"{street}: {label} folded")
             continue
 
-        curr_bet = _bet_of(curr_p)
-        prev_bet = _bet_of(prev_p)
+        curr_bet = chips(curr_p.get("bet"))
+        prev_bet = chips(prev_p.get("bet"))
         if curr_bet <= prev_bet:
             continue  # no new chips committed by this player
 
@@ -401,7 +364,7 @@ def main():
                 num_community = len(current_game_summary["community_cards"])
                 new_street = _get_street(num_community)
                 you_name = current_game_summary.get("you_name")
-                user_cards = _get_user_cards(current_game_summary)
+                user_cards = hole_cards(current_game_summary)
                 available_actions = current_game_summary.get("available_actions", [])
                 current_player = current_game_summary.get("current_player")
 
@@ -491,7 +454,7 @@ def main():
                 # sweep bets into the pot until the street ends. This re-fires on
                 # every street AND every bet/raise you face. Preflop uses the GTO table.
                 is_postflop = num_community >= 3
-                to_call = _amount_to_call(current_game_summary)
+                to_call = amount_to_call(current_game_summary)
                 decision_key = (
                     tuple(current_game_summary.get("community_cards", [])),
                     round(to_call, 2),

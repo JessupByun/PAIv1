@@ -81,3 +81,15 @@ def test_evaluate_starting_hand_no_cards():
     ]}
     result = evaluate_starting_hand_strength(game_summary)
     assert "No known" in result
+
+
+def test_evaluate_starting_hand_at_showdown_uses_you_name():
+    # At showdown every hand is face up; you_name must decide whose it is.
+    game_summary = {
+        "you_name": "You",
+        "players": [
+            {"name": "Alice", "cards": ["7 of Spades", "2 of Hearts"], "status": "Active"},
+            {"name": "You",   "cards": ["Ace of Spades", "Ace of Hearts"], "status": "Active"},
+        ],
+    }
+    assert evaluate_starting_hand_strength(game_summary) == "Premium"

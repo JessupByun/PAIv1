@@ -54,3 +54,17 @@ def test_unknown_card_returns_error():
     )
     result = evaluate_best_hand(summary)
     assert "Unknown" in result or "error" in result.lower()
+
+
+def test_showdown_evaluates_your_hand_not_the_opponents():
+    # Opponent cards become visible at showdown; you_name disambiguates.
+    game_summary = {
+        "you_name": "You",
+        "community_cards": ["2 of Clubs", "7 of Diamonds", "9 of Spades",
+                            "Jack of Hearts", "4 of Clubs"],
+        "players": [
+            {"name": "Alice", "cards": ["2 of Spades", "2 of Hearts"]},
+            {"name": "You",   "cards": ["Ace of Spades", "Ace of Hearts"]},
+        ],
+    }
+    assert evaluate_best_hand(game_summary).startswith("Pair of As")

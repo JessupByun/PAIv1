@@ -1,3 +1,5 @@
+from backend.util import hole_cards
+
 # Sklansky & Malmuth hand groups (from "Hold 'em Poker for Advanced Players")
 # Groups 1-2 → Premium, 3-4 → Strong, 5-6 → Medium, 7-8 → Playable, unranked → Trash
 
@@ -90,9 +92,7 @@ def classify_starting_hand(hand_str):
 
 
 def evaluate_starting_hand_strength(game_summary):
-    for player in game_summary.get("players", []):
-        cards = player.get("cards", [])
-        if all(card != "Unknown Card" for card in cards) and len(cards) == 2:
-            hand = canonical_starting_hand(cards[0], cards[1])
-            return classify_starting_hand(hand)
-    return "No known cards found"
+    cards = hole_cards(game_summary)
+    if not cards:
+        return "No known cards found"
+    return classify_starting_hand(canonical_starting_hand(*cards))
