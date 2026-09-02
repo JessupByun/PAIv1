@@ -1,6 +1,7 @@
 import os
 import time
 import threading
+from urllib.parse import urlparse
 import contextlib
 import io
 from selenium import webdriver
@@ -297,6 +298,13 @@ def _build_action_history(prev: dict, curr: dict, street: str, you_name: str) ->
     return events
 
 
+def _is_pokernow_game_url(url: str) -> bool:
+    host = urlparse(url).hostname or ""
+    return (host == "pokernow.club" or host.endswith(".pokernow.club")
+            or host == "pokernow.com" or host.endswith(".pokernow.com")) \
+        and "/games/" in url
+
+
 def main():
     options = webdriver.ChromeOptions()
     options.add_argument("--allow-insecure-localhost")
@@ -312,14 +320,12 @@ def main():
         client.cookie_manager.save_cookies()
 
         while True:
-            gameLink = input("Please enter the link to your PokerNow table: ")
-            if not (gameLink.startswith("https://www.pokernow.club/games/") or
-                    gameLink.startswith("https://www.pokernow.com/games/")):
-                print("Invalid link. Must be a pokernow.club or pokernow.com game URL.")
-                continue
-            break
+            game_link = input("Please enter the link to your PokerNow table: ").strip()
+            if _is_pokernow_game_url(game_link):
+                break
+            print("Invalid link. Must be a pokernow.club or pokernow.com game URL.")
 
-        client.navigate(gameLink)
+        client.navigate(game_link)
         time.sleep(5)
 
         inject_overlay(driver, WS_PORT)
@@ -333,10 +339,10 @@ def main():
         in_hand = False                # True once a hand is underway
         hand_saved = False
 
-        # LLM trigger state — fires once per unique (board, pot) decision spot
+        # LLM trigger state - fires once per unique (board, amount-to-call) spot
         llm_cache = {"result": {}, "pending": False}
         llm_broadcast_sent = False
-        last_decision_key = None       # (board, pot) of the last spot we fired on
+        last_decision_key = None       # the last spot we fired on
 
         while True:
             try:

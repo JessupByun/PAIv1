@@ -113,3 +113,4 @@ def test_amount_to_call_when_checked_to_you():
 def test_amount_to_call_never_negative_when_you_lead():
     summary = {"you_name": "You", "players": [_hero(bet=60), _villain(bet=0)]}
     assert amount_to_call(summary) == 0.0
+
