@@ -49,7 +49,7 @@ WSServer localhost:8765
 | Street | Who decides |
 |--------|-------------|
 | Preflop | GTO lookup table, instant and deterministic |
-| Flop / Turn / River | LLM (`llama-3.3-70b-versatile` via Groq), sees full hand context |
+| Flop / Turn / River | LLM (`openai/gpt-oss-120b` via Groq), sees full hand context |
 
 ---
 
@@ -109,9 +109,11 @@ Claude must follow them without being reminded.
 - On error the LLM returns `{}` and the overlay keeps the heuristic recommendation.
 - The Groq client is built lazily by `_groq()`.
   Importing the module must never require a key.
-- Model: `llama-3.3-70b-versatile` default, override with `PAI_LLM_MODEL`
-  (`llama-3.1-8b-instant` is roughly 2x faster).
+- Model: `LLM_deployment.DEFAULT_MODEL` (`openai/gpt-oss-120b`), override with `PAI_LLM_MODEL`
+  (`qwen/qwen3.8-27b` is roughly 2x faster).
   Verify availability via `groq.models.list()` before changing.
+- `MAX_TOKENS` is 1500, not a tight budget: reasoning models spend part of it before emitting any
+  JSON, and at 400 the API rejected the empty completion outright.
 
 ### Turn detection
 - The authoritative signal is `current_player` (the `.decision-current` element) compared against
@@ -238,7 +240,7 @@ Claude must follow them without being reminded.
 | `dealer_position` is not a list index | It is an absolute seat number (1-10); sort active seats and rotate |
 | `you-player` CSS class may be absent before login | `get_player_seats()` returns `{}` gracefully; position falls back to `"Unknown"` |
 | WS `ws://` blocked on `https://` page | Enable `chrome://flags/#allow-insecure-localhost` |
-| LLM model decommissioned silently | Verify with `groq.models.list()` before changing; last verified `llama-3.3-70b-versatile` |
+| LLM model decommissioned silently | Groq retired the whole llama-3.x line under this project. Verify with `groq.models.list()`; last verified `openai/gpt-oss-120b` and `qwen/qwen3.8-27b` |
 | Double LLM broadcast every 2s | `llm_broadcast_sent` gates the secondary push |
 | Overlay blank on new connection | `WSServer._last_message` sends cached state to new connections |
 | Illogical action shown, e.g. "Check" facing a bet | `build_stats_payload()` replaces any action not in `available_actions` with call → check → fold |

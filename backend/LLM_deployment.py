@@ -13,6 +13,14 @@ _client = None
 
 DEBUG = os.getenv("PAI_DEBUG", "").lower() in ("1", "true", "yes")
 
+# Verified against groq.models.list(). The llama-3.x models this project shipped
+# with have been decommissioned by Groq.
+DEFAULT_MODEL = "openai/gpt-oss-120b"
+
+# Generous, because reasoning models spend part of the budget before emitting any
+# JSON: at 400 the response came back empty and the API rejected it outright.
+MAX_TOKENS = 1500
+
 # How often to nudge the model toward a bluff (postflop). Split into a
 # context-driven nudge and a rarer pure-balance ("for no reason") nudge.
 # Tune with the PAI_BLUFF_RATE env var (0.0 disables bluffing nudges).
@@ -174,7 +182,7 @@ def generate_dashboard_explanation(
             ],
             model=model_name,
             temperature=0.5,  # a bit of variation so bluffs/sizings aren't identical every time
-            max_tokens=400,
+            max_tokens=MAX_TOKENS,
             response_format={"type": "json_object"},
         )
         raw = response.choices[0].message.content.strip() if response.choices else "{}"

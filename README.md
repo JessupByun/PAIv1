@@ -52,7 +52,7 @@ The overlay appears top-right, updates every 2 seconds, and glows green when it 
 | Env var | Default | Purpose |
 |---------|---------|---------|
 | `GROQ_API_KEY` | required | Groq API key |
-| `PAI_LLM_MODEL` | `llama-3.3-70b-versatile` | `llama-3.1-8b-instant` is roughly twice as fast |
+| `PAI_LLM_MODEL` | `openai/gpt-oss-120b` | `qwen/qwen3.8-27b` is roughly twice as fast |
 | `PAI_WS_PORT` | `8765` | WebSocket port for the overlay |
 | `PAI_BLUFF_RATE` | `0.35` | How often the model is nudged toward a bluff; `0` disables it |
 | `PAI_DEBUG` | off | `1` prints the full LLM prompt and response |

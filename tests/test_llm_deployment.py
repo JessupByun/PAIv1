@@ -3,14 +3,17 @@ Integration test for LLM deployment — makes a real Groq API call.
 Requires GROQ_API_KEY in environment or .env file.
 Run with: pytest tests/test_llm_deployment.py -v -s
 """
+import os
+
 import pytest
+
 import backend.LLM_deployment as LLM
 from backend.LLM_deployment import (
     generate_dashboard_explanation, _build_prompt, _players_block, _coerce_bet_size,
     _bluff_directive,
 )
 
-MODEL = "llama-3.3-70b-versatile"
+MODEL = os.getenv("PAI_LLM_MODEL", LLM.DEFAULT_MODEL)
 
 
 # ── _coerce_bet_size (unit) ──────────────────────────────────────────────────

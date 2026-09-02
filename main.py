@@ -13,11 +13,10 @@ from backend.pot_odds import calculate_pot_odds
 from backend.heuristics import calculate_position, calculate_spr, calculate_effective_stack, recommend_action, recommend_bet_size
 from backend.util import amount_to_call, chips, hole_cards, is_active, safe_float
 from backend.ws_server import WSServer
-from backend.LLM_deployment import generate_dashboard_explanation
+from backend.LLM_deployment import DEFAULT_MODEL, generate_dashboard_explanation
 
-# Model is configurable via env var. Defaults to the 70B (best decisions, ~1s).
-# For a faster demo set:  PAI_LLM_MODEL=llama-3.1-8b-instant  (~0.6s)
-LLM_MODEL = os.environ.get("PAI_LLM_MODEL", "llama-3.3-70b-versatile")
+# For a faster (and slightly weaker) decision, set PAI_LLM_MODEL=qwen/qwen3.8-27b
+LLM_MODEL = os.environ.get("PAI_LLM_MODEL", DEFAULT_MODEL)
 WS_PORT = int(os.environ.get("PAI_WS_PORT", 8765))
 
 def clear_console():
