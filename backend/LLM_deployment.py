@@ -5,7 +5,13 @@ from dotenv import load_dotenv
 from groq import Groq
 
 load_dotenv()
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+# Importing this module must not require a key - the test suite imports it to
+# exercise prompt building, and main.py imports it before the user has a chance
+# to see any error. The client is built on the first real call instead.
+_client = None
+
+DEBUG = os.getenv("PAI_DEBUG", "").lower() in ("1", "true", "yes")
 
 # How often to nudge the model toward a bluff (postflop). Split into a
 # context-driven nudge and a rarer pure-balance ("for no reason") nudge.
@@ -32,6 +38,18 @@ Bluffing — poker is not just value betting; bluffing is part of strong, unpred
 - Avoid bluffing: multiway pots, into shown strength, when there is little fold equity (short or committed stacks), or when your hand has showdown value that would rather check/call.
 - A bluff is a Raise or Bet (never a "bluff-fold"). Size it to credibly represent the hand you're repping.
 - When you bluff, say so plainly in action_reason and name the hand/line you are representing."""
+
+def _groq() -> Groq:
+    global _client
+    if _client is None:
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY is not set. Copy .env.example to .env and add your key."
+            )
+        _client = Groq(api_key=api_key)
+    return _client
+
 
 def _coerce_bet_size(val, effective_stack):
     """Parse the LLM's bet_size to a positive number, clamped to the effective
@@ -146,9 +164,10 @@ def generate_dashboard_explanation(
     Returns {action, action_reason, key_factors, risk_note} or {} on error.
     """
     prompt = _build_prompt(stats, game_summary, action_history or []) + _bluff_directive()
-    print(f"[PAI] LLM prompt:\n{prompt}\n")
+    if DEBUG:
+        print(f"[PAI] LLM prompt:\n{prompt}\n")
     try:
-        response = client.chat.completions.create(
+        response = _groq().chat.completions.create(
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user",   "content": prompt},
@@ -159,7 +178,8 @@ def generate_dashboard_explanation(
             response_format={"type": "json_object"},
         )
         raw = response.choices[0].message.content.strip() if response.choices else "{}"
-        print(f"[PAI] LLM response: {raw}")
+        if DEBUG:
+            print(f"[PAI] LLM response: {raw}")
         parsed = json.loads(raw)
 
         # Validate action against available_actions (case-insensitive)
@@ -178,12 +198,17 @@ def generate_dashboard_explanation(
         if action.lower() in ("raise", "bet"):
             bet_size = _coerce_bet_size(parsed.get("bet_size"), stats.get("effective_stack"))
 
+        # The model occasionally returns key_factors as a single string.
+        factors = parsed.get("key_factors") or []
+        if not isinstance(factors, list):
+            factors = [str(factors)]
+
         return {
             "action":        action,
             "bet_size":      bet_size,
-            "action_reason": parsed.get("action_reason", ""),
-            "key_factors":   parsed.get("key_factors", [])[:3],
-            "risk_note":     parsed.get("risk_note", ""),
+            "action_reason": str(parsed.get("action_reason", "")),
+            "key_factors":   [str(f) for f in factors[:3]],
+            "risk_note":     str(parsed.get("risk_note", "")),
         }
     except Exception as e:
         print(f"[PAI] LLM error: {e}")

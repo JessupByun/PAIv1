@@ -162,3 +162,31 @@ def test_llm_returns_valid_action():
     print(f"Reason      : {result['action_reason']}")
     print(f"Key factors : {result['key_factors']}")
     print(f"Risk note   : {result['risk_note']}")
+
+
+def test_key_factors_coerced_to_a_list_of_strings(monkeypatch):
+    # The model sometimes returns key_factors as one string instead of a list.
+    class _Message:
+        content = '{"action": "call", "key_factors": "position", "action_reason": "x", "risk_note": "y"}'
+
+    class _Choice:
+        message = _Message()
+
+    class _Completions:
+        def create(self, **_kwargs):
+            return type("R", (), {"choices": [_Choice()]})()
+
+    monkeypatch.setattr(
+        LLM, "_groq",
+        lambda: type("C", (), {"chat": type("Chat", (), {"completions": _Completions()})()})(),
+    )
+    stats, game_summary, _ = _make_flop_hand()
+    result = generate_dashboard_explanation(MODEL, stats, game_summary, [])
+    assert result["key_factors"] == ["position"]
+
+
+def test_missing_api_key_raises_a_readable_error(monkeypatch):
+    monkeypatch.setattr(LLM, "_client", None)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
+        LLM._groq()
