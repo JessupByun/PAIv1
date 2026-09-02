@@ -1,6 +1,6 @@
 # PAIv1
 
-![PAIv1 overlay during a live PokerNow hand](docs/overlay.png)
+![PAIv1 overlay recommending a river raise during a live PokerNow hand](docs/overlay.png)
 
 PAIv1 is a real-time poker assistant for [PokerNow](https://www.pokernow.club).
 It reads the live table straight out of the browser, works out where you stand, and shows a recommended action in a floating overlay along with the reasoning behind it.
