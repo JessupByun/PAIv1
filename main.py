@@ -11,7 +11,7 @@ from backend.hand_strength import evaluate_starting_hand_strength, canonical_sta
 from backend.eval_best_hand import evaluate_best_hand
 from backend.pot_odds import calculate_pot_odds
 from backend.heuristics import calculate_position, calculate_spr, calculate_effective_stack, recommend_action, recommend_bet_size
-from backend.util import amount_to_call, chips, hole_cards, is_active, safe_float
+from backend.util import amount_to_call, chips, hole_cards, is_active, local_player, safe_float
 from backend.ws_server import WSServer
 from backend.LLM_deployment import DEFAULT_MODEL, generate_dashboard_explanation
 
@@ -145,6 +145,28 @@ def _safe_json_float(val):
     return round(f, 2)
 
 
+def _legal_actions(game_summary: dict, available_actions: list) -> list:
+    """
+    Narrow the scraped action buttons to what the rules of poker actually allow.
+
+    PokerNow renders every button and greys out the ones that don't apply, so the
+    scraped list offers "check" even while facing a bet. Nothing downstream caught
+    that: the guard in build_stats_payload only rejects actions missing from the
+    list, and the LLM prompt presented "check" as a legal option.
+
+    Only filters when the local player is identified, since both rules key off
+    amount_to_call and a misidentified hero would make it meaningless.
+    """
+    if local_player(game_summary) is None:
+        return available_actions
+
+    to_call = amount_to_call(game_summary)
+    # You cannot check when there are chips to call, and calling is meaningless
+    # when there are none.
+    illegal = "check" if to_call > 0 else "call"
+    return [a for a in available_actions if a.lower() != illegal]
+
+
 def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
     num_community = len(game_summary.get("community_cards", []))
     community_cards = game_summary.get("community_cards", [])
@@ -166,7 +188,7 @@ def build_stats_payload(game_summary: dict, llm_result: dict = None) -> dict:
     position = calculate_position(game_summary)
     spr = _safe_json_float(calculate_spr(game_summary))
     effective_stack = _safe_json_float(calculate_effective_stack(game_summary))
-    available_actions = game_summary.get("available_actions", [])
+    available_actions = _legal_actions(game_summary, game_summary.get("available_actions", []))
     active_players = [p for p in game_summary.get("players", []) if is_active(p)]
 
     heuristic_rec = recommend_action(

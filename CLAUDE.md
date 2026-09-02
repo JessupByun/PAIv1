@@ -62,7 +62,7 @@ Claude must follow them without being reminded.
 - Run `pytest` before reporting any task complete.
 - Every new module gets a corresponding test file in `tests/`.
 - Tests must cover both happy path and edge cases (empty input, "All In" strings, zero division).
-- Current count: **87 tests passing** across 9 files, plus 1 opt-in integration test.
+- Current count: **91 tests passing** across 9 files, plus 1 opt-in integration test.
 
 ### Never parse DOM values by hand
 - Everything numeric off the PokerNow DOM arrives as a string and is not always a number.
@@ -121,7 +121,11 @@ Claude must follow them without being reminded.
   This avoids false positives where action buttons linger for a tick after we have already acted.
 - Only when identity is unknown does the loop fall back to OR-ing the library's `is_your_turn()` with
   `len(available_actions) > 0`.
-- `build_stats_payload()` guards against illogical actions: any recommended action not in
+- `_legal_actions()` runs first and drops actions the rules forbid: "check" when `amount_to_call`
+  is positive, "call" when it is zero.
+  The scraped list cannot be trusted on its own, since PokerNow reports greyed-out buttons as
+  available, and both the guard below and the LLM prompt read from it.
+- `build_stats_payload()` then guards against illogical actions: any recommended action not in
   `available_actions` is replaced (call → check → fold), and fold is never recommended when checking
   is free.
 
@@ -160,7 +164,7 @@ Claude must follow them without being reminded.
 | `tests/test_heuristics.py` | `backend/heuristics.py` | Position calc, SPR, effective stack, bet sizing |
 | `tests/test_ws_server.py` | `backend/ws_server.py` | Server start, client connect, broadcast receive |
 | `tests/test_llm_deployment.py` | `backend/LLM_deployment.py` | Prompt structure, response coercion, missing-key error, live API call |
-| `tests/test_main.py` | `main.py` | Game URL validation |
+| `tests/test_main.py` | `main.py` | Game URL validation, legal-action filtering |
 
 ### Required assertions per module
 
@@ -243,7 +247,8 @@ Claude must follow them without being reminded.
 | LLM model decommissioned silently | Groq retired the whole llama-3.x line under this project. Verify with `groq.models.list()`; last verified `openai/gpt-oss-120b` and `qwen/qwen3.8-27b` |
 | Double LLM broadcast every 2s | `llm_broadcast_sent` gates the secondary push |
 | Overlay blank on new connection | `WSServer._last_message` sends cached state to new connections |
-| Illogical action shown, e.g. "Check" facing a bet | `build_stats_payload()` replaces any action not in `available_actions` with call → check → fold |
+| Scraped `available_actions` includes greyed-out buttons | PokerNow renders every action button and disables the inapplicable ones, so the list offers "check" while facing a bet. `_legal_actions()` filters by `amount_to_call` before anything (guard, heuristic, LLM prompt) reads the list |
+| Illogical action shown, e.g. "Check" facing a bet | `build_stats_payload()` replaces any action not in `available_actions` with call → check → fold. Note this only catches *missing* actions, which is why `_legal_actions()` has to run first |
 | Overlay stuck on port 8765 after `PAI_WS_PORT` | `inject_overlay()` must stamp `window.__PAI_WS_PORT`; the frontend reads it |
 
 ---
