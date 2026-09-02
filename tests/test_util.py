@@ -1,5 +1,3 @@
-import pytest
-
 from backend.util import (
     amount_to_call,
     chips,

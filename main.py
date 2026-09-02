@@ -1,8 +1,8 @@
 import os
 import time
-import json
 import threading
 import contextlib
+import io
 from selenium import webdriver
 from PokerNow import PokerClient
 
@@ -20,7 +20,7 @@ LLM_MODEL = os.environ.get("PAI_LLM_MODEL", "llama-3.3-70b-versatile")
 WS_PORT = int(os.environ.get("PAI_WS_PORT", 8765))
 
 def clear_console():
-    os.system('cls' if os.name == 'nt' else 'clear')
+    print("\033[H\033[J", end="")
 
 def get_player_seats(driver) -> dict:
     """
@@ -249,15 +249,6 @@ def _fetch_llm_explanation(stats: dict, game_summary: dict, action_history: list
         cache["pending"] = False  # guarantee we never get stuck "pending"
 
 
-def _new_hand_state():
-    return {
-        "preflop": None,
-        "flop": None,
-        "turn": None,
-        "river": None,
-    }
-
-
 def _build_action_history(prev: dict, curr: dict, street: str, you_name: str) -> list[str]:
     """
     Diff two consecutive game summaries (from the SAME street) and return any new
@@ -333,12 +324,9 @@ def main():
         inject_overlay(driver)
         print("Overlay injected. Starting game loop. Press Ctrl+C to exit.\n")
 
-        null_output = open(os.devnull, "w")
-
         # ── Per-session state ────────────────────────────────────────────────
         prev_game_summary = None       # last tick's summary (for diffing)
         prev_street_summary = None     # last tick's summary on the SAME street (action baseline)
-        hand_snapshots = _new_hand_state()
         action_history: list[str] = []
         current_street = None          # None until first preflop tick of a hand
         in_hand = False                # True once a hand is underway
@@ -351,7 +339,7 @@ def main():
 
         while True:
             try:
-                with contextlib.redirect_stdout(null_output):
+                with contextlib.redirect_stdout(io.StringIO()):
                     raw_game_state = client.game_state_manager.get_game_state()
                 player_seats = get_player_seats(driver)
                 current_game_summary = get_game_summary(raw_game_state, player_seats)
@@ -394,7 +382,6 @@ def main():
                     and (not in_hand or current_street not in (None, "Preflop"))
                 )
                 if is_new_hand:
-                    hand_snapshots = _new_hand_state()
                     action_history = []
                     current_street = "Preflop"
                     in_hand = True
@@ -403,6 +390,26 @@ def main():
                     llm_broadcast_sent = False
                     last_decision_key = None
                     prev_street_summary = None
+
+                # ── Decision spot ───────────────────────────────────────────
+                # A "spot" is identified by (board, amount-to-call). Using
+                # amount-to-call (not pot) is what tells a fresh check spot apart
+                # from facing a bet/raise on the SAME board - PokerNow doesn't
+                # sweep bets into the pot until the street ends.
+                is_postflop = num_community >= 3
+                to_call = amount_to_call(current_game_summary)
+                decision_key = (
+                    tuple(current_game_summary.get("community_cards", [])),
+                    round(to_call, 2),
+                )
+                new_spot = decision_key != last_decision_key
+
+                # Retire the previous spot's LLM output as soon as the spot moves on,
+                # so the broadcast below can't pair this board with last street's
+                # reasoning and action.
+                if new_spot and not llm_cache["pending"] and llm_cache["result"]:
+                    llm_cache["result"] = {}
+                    llm_broadcast_sent = False
 
                 state_changed = current_game_summary != prev_game_summary
 
@@ -425,11 +432,6 @@ def main():
                         action_history.extend(new_events)
                     prev_street_summary = current_game_summary
 
-                    # ── Capture first snapshot of each street ────────────────
-                    key = {0: "preflop", 3: "flop", 4: "turn", 5: "river"}.get(num_community)
-                    if key and hand_snapshots.get(key) is None:
-                        hand_snapshots[key] = current_game_summary
-
                     # ── Build stats and broadcast to overlay ─────────────────
                     stats = build_stats_payload(current_game_summary, llm_cache["result"])
                     ws_server.broadcast(stats)
@@ -448,18 +450,8 @@ def main():
                     prev_game_summary = current_game_summary
 
                 # ── LLM trigger: postflop, when it's your turn at a NEW spot ─
-                # A "spot" is identified by (board, amount-to-call). Using
-                # amount-to-call (not pot) is what lets a fresh check spot be told
-                # apart from facing a bet/raise on the SAME board — PokerNow doesn't
-                # sweep bets into the pot until the street ends. This re-fires on
-                # every street AND every bet/raise you face. Preflop uses the GTO table.
-                is_postflop = num_community >= 3
-                to_call = amount_to_call(current_game_summary)
-                decision_key = (
-                    tuple(current_game_summary.get("community_cards", [])),
-                    round(to_call, 2),
-                )
-                new_spot = decision_key != last_decision_key
+                # Re-fires on every street AND every bet/raise you face.
+                # Preflop is served by the GTO table instead.
                 if is_your_turn and is_postflop and new_spot and not llm_cache["pending"]:
                     last_decision_key = decision_key
                     llm_cache["pending"] = True
@@ -493,15 +485,10 @@ def main():
                 if current_game_summary.get("winners") and not hand_saved:
                     hand_saved = True
                     in_hand = False
-                    print("\n=== Round Over ===")
-                    for label, snap in [
-                        ("Preflop", hand_snapshots["preflop"]),
-                        ("Flop",    hand_snapshots["flop"]),
-                        ("Turn",    hand_snapshots["turn"]),
-                        ("River",   hand_snapshots["river"]),
-                    ]:
-                        print(f"\n{label}:")
-                        print(json.dumps(snap, indent=2) if snap else "N/A")
+                    winners = ", ".join(w["name"] for w in current_game_summary["winners"])
+                    print(f"\n=== Round over - won by {winners} ===")
+                    if action_history:
+                        print("   " + " | ".join(action_history))
 
             except Exception as e:
                 print(f"[PAI] Loop error (continuing): {type(e).__name__}: {e}")
@@ -511,7 +498,6 @@ def main():
     except KeyboardInterrupt:
         print("\nExited by user.")
     finally:
-        null_output.close()
         ws_server.stop()
         driver.quit()
 
