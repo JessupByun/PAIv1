@@ -92,3 +92,11 @@ def test_evaluate_starting_hand_at_showdown_uses_you_name():
         ],
     }
     assert evaluate_starting_hand_strength(game_summary) == "Premium"
+
+
+def test_all_hands_covers_every_canonical_hand_exactly_once():
+    from backend.hand_strength import _ALL_HANDS
+    assert len(_ALL_HANDS) == 169
+    assert sum(1 for h in _ALL_HANDS if len(h) == 2) == 13   # pocket pairs
+    assert sum(1 for h in _ALL_HANDS if h.endswith("s")) == 78
+    assert sum(1 for h in _ALL_HANDS if h.endswith("o")) == 78

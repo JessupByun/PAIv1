@@ -213,14 +213,6 @@ _TABLE = {
 # Column index for each position key
 _POS_INDEX = {"EP": 0, "MP": 1, "BTN": 2, "SB": 3, "BB": 4}
 
-# Fallback by hand tier if hand not in table (shouldn't happen for standard 169)
-_TIER_FALLBACK = {
-    "Premium": "Raise",
-    "Strong":  "Raise",
-    "Medium":  "Call",
-    "Weak":    "Fold",
-}
-
 
 def lookup_preflop_action(hand_canonical: str, position: str) -> str:
     """
@@ -231,19 +223,13 @@ def lookup_preflop_action(hand_canonical: str, position: str) -> str:
         position: output of calculate_position(), e.g. 'Early', 'Late', 'Small Blind'
 
     Returns:
-        'Raise', 'Call', or 'Fold'
+        'Raise', 'Call', or 'Fold'. Anything outside the 169 canonical hands
+        folds - the table is complete, so a miss means the input was malformed.
     """
     pos_key = _POSITION_KEY_MAP.get(position, "BTN")
     col = _POS_INDEX.get(pos_key, 2)
-
     row = _TABLE.get(hand_canonical)
-    if row is not None:
-        return row[col]
-
-    # Fallback: classify by tier
-    from backend.hand_strength import classify_starting_hand
-    tier = classify_starting_hand(hand_canonical)
-    return _TIER_FALLBACK.get(tier, "Fold")
+    return row[col] if row is not None else "Fold"
 
 
 def get_all_hands_for_position(position: str) -> dict:
