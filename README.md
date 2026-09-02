@@ -1,10 +1,11 @@
 # PAIv1
 
-A real-time poker assistant for [PokerNow](https://www.pokernow.club).
+![PAIv1 overlay during a live PokerNow hand](docs/overlay.png)
+
+PAIv1 is a real-time poker assistant for [PokerNow](https://www.pokernow.club).
 It reads the live table straight out of the browser, works out where you stand, and shows a recommended action in a floating overlay along with the reasoning behind it.
 
-I love poker and PokerNow is where I play, so I built an agent for it.
-Solo project, built for fun.
+I built this AI assistant to integrate with PokerNow which is a popular website where my friends and I can load a quick poker game. The tool can also be highly used for education of the game and teach beginners the fundamentals.
 
 ---
 
@@ -85,9 +86,3 @@ pytest                     # everything except the live API call
 pytest -m integration      # real Groq call, needs a key
 ```
 
----
-
-## Note
-
-Built for my own use.
-Check the rules of any table you sit at before running it.
