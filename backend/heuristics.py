@@ -1,36 +1,7 @@
-from backend.preflop_table import lookup_preflop_action
 from backend.hand_strength import canonical_starting_hand
+from backend.preflop_table import lookup_preflop_action
+from backend.util import chips, hole_cards, is_active, local_player, safe_float
 
-def _get_user_player(game_summary):
-    """
-    Return the local player's dict. Uses you_name (from you-player CSS class) when
-    available, falls back to finding the player with visible hole cards.
-    """
-    you_name = game_summary.get("you_name")
-    if you_name:
-        for p in game_summary.get("players", []):
-            if p.get("name") == you_name:
-                return p
-    # Fallback: first player with known hole cards
-    for p in game_summary.get("players", []):
-        cards = p.get("cards", [])
-        if len(cards) == 2 and all(c != "Unknown Card" for c in cards):
-            return p
-    return None
-
-def _safe_float_stack(stack_val):
-    """Convert a stack value to float, returning None for 'All In' or invalid."""
-    if isinstance(stack_val, str):
-        if stack_val.strip().lower() == "all in":
-            return None
-        try:
-            return float(stack_val.replace(",", ""))
-        except ValueError:
-            return None
-    try:
-        return float(stack_val)
-    except (TypeError, ValueError):
-        return None
 
 def calculate_position(game_summary):
     """
@@ -43,7 +14,7 @@ def calculate_position(game_summary):
     if not players:
         return "Unknown"
 
-    user = _get_user_player(game_summary)
+    user = local_player(game_summary)
     if user is None:
         return "Unknown"
 
@@ -98,11 +69,11 @@ def calculate_position(game_summary):
 def calculate_spr(game_summary):
     """Stack-to-pot ratio: user_stack / pot_size. Returns float('inf') if pot is 0."""
     pot = float(game_summary.get("pot_size", 0) or 0)
-    user = _get_user_player(game_summary)
+    user = local_player(game_summary)
     if user is None:
         return float("inf")
 
-    stack = _safe_float_stack(user.get("stack"))
+    stack = safe_float(user.get("stack"))
     if stack is None:
         return float("inf")  # All In
 
@@ -118,11 +89,11 @@ def calculate_effective_stack(game_summary):
     Ignores All-In players (they cap the effective stack to 0 beyond their contribution).
     Returns user's stack if no opponents found.
     """
-    user = _get_user_player(game_summary)
+    user = local_player(game_summary)
     if user is None:
         return 0.0
 
-    user_stack = _safe_float_stack(user.get("stack"))
+    user_stack = safe_float(user.get("stack"))
     if user_stack is None:
         return 0.0  # user is all-in
 
@@ -130,9 +101,9 @@ def calculate_effective_stack(game_summary):
     for p in game_summary.get("players", []):
         if p.get("name") == user.get("name"):
             continue
-        if str(p.get("status", "")).upper() in ("FOLDED", "OFFLINE"):
+        if not is_active(p):
             continue
-        s = _safe_float_stack(p.get("stack"))
+        s = safe_float(p.get("stack"))
         if s is not None:
             opponent_stacks.append(s)
 
@@ -160,26 +131,21 @@ def recommend_action(game_summary, hand_strength, pot_odds, spr, position, avail
     is_preflop = num_community == 0
 
     # --- Preflop: use GTO lookup table ---
-    if is_preflop:
-        user = _get_user_player(game_summary)
-        if user:
-            cards = user.get("cards", [])
-            if len(cards) == 2 and all(c != "Unknown Card" for c in cards):
-                hand_canonical = canonical_starting_hand(cards[0], cards[1])
-                table_action = lookup_preflop_action(hand_canonical, position)
-                # Never fold for free: if it's checked to us (we have the option),
-                # check instead of folding. This must come BEFORE the "table action
-                # is available" check, because Fold is always an offered button.
-                if table_action == "Fold" and can_check:
-                    return "Check"
-                # Validate the table action is actually available
-                if table_action.lower() in actions_lower:
-                    return table_action
-                # Fallbacks if the table action isn't directly offered
-                if table_action == "Raise" and can_call:
-                    return "Call"
-                if table_action in ("Call", "Raise") and can_check:
-                    return "Check"
+    cards = hole_cards(game_summary)
+    if is_preflop and cards:
+        table_action = lookup_preflop_action(canonical_starting_hand(*cards), position)
+        # Never fold for free: if it's checked to us (we have the option), check
+        # instead of folding. This must come BEFORE the "table action is available"
+        # check, because Fold is always an offered button.
+        if table_action == "Fold" and can_check:
+            return "Check"
+        if table_action.lower() in actions_lower:
+            return table_action
+        # Fallbacks if the table action isn't directly offered
+        if table_action == "Raise" and can_call:
+            return "Call"
+        if table_action in ("Call", "Raise") and can_check:
+            return "Check"
 
     # --- Postflop heuristic ---
     if can_check:
@@ -222,7 +188,7 @@ def recommend_bet_size(game_summary, action, position, blinds):
     if str(action).lower() not in ("raise", "bet"):
         return None
 
-    bb = _safe_float_stack(blinds[1]) if blinds and len(blinds) >= 2 else None
+    bb = safe_float(blinds[1]) if blinds and len(blinds) >= 2 else None
     if not bb or bb <= 0:
         return None
 
@@ -233,7 +199,7 @@ def recommend_bet_size(game_summary, action, position, blinds):
     for p in game_summary.get("players", []):
         if p.get("name") == you_name:
             continue
-        b = _safe_float_stack(p.get("bet")) or 0.0
+        b = chips(p.get("bet"))
         if b > opp_max_bet:
             opp_max_bet = b
 

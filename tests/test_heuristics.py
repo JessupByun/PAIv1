@@ -5,7 +5,6 @@ from backend.heuristics import (
     calculate_effective_stack,
     recommend_action,
     recommend_bet_size,
-    _safe_float_stack,
 )
 
 
@@ -41,22 +40,6 @@ def _user_player(stack=500, cards=None, seat=None):
     return _make_player("You", stack=stack,
                         cards=cards or ["Ace of Spades", "King of Hearts"],
                         seat=seat)
-
-
-# ── _safe_float_stack ─────────────────────────────────────────────────────────
-
-def test_safe_float_normal():
-    assert _safe_float_stack(500) == 500.0
-    assert _safe_float_stack("250.5") == 250.5
-
-
-def test_safe_float_all_in_string():
-    assert _safe_float_stack("All In") is None
-    assert _safe_float_stack("all in") is None
-
-
-def test_safe_float_invalid():
-    assert _safe_float_stack("N/A") is None
 
 
 # ── calculate_spr ─────────────────────────────────────────────────────────────
