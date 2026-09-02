@@ -1,7 +1,8 @@
-selenium>=4.0.0
-webdriver_manager>=3.8.0
-treys>=0.1.8
-python-dotenv>=0.19.0
+PokerNow>=0.7
 groq>=0.25.0
-websockets>=16.0
 pytest>=7.0.0
+python-dotenv>=0.19.0
+selenium>=4.0.0
+treys>=0.1.8
+webdriver_manager>=3.8.0
+websockets>=16.0

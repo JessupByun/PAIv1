@@ -1,7 +1,4 @@
 import pytest
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from backend.preflop_table import lookup_preflop_action, get_all_hands_for_position, _TABLE
 from backend.hand_strength import _ALL_HANDS as starting_hands_ranked
 

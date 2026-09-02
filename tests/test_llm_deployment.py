@@ -4,9 +4,6 @@ Requires GROQ_API_KEY in environment or .env file.
 Run with: pytest tests/test_llm_deployment.py -v -s
 """
 import pytest
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 import backend.LLM_deployment as LLM
 from backend.LLM_deployment import (
     generate_dashboard_explanation, _build_prompt, _players_block, _coerce_bet_size,

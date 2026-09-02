@@ -1,7 +1,4 @@
 import pytest
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from backend.eval_best_hand import evaluate_best_hand
 
 

@@ -1,7 +1,4 @@
 import pytest
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from backend.hand_strength import (
     parse_card,
     canonical_starting_hand,
